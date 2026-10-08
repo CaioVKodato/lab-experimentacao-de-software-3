@@ -9,6 +9,9 @@ from pathlib import Path
 
 import yaml
 
+from pipeline.github_client import GitHubClient
+from pipeline.selection import run_selection, write_selection_outputs
+
 
 def load_config(path: Path) -> dict:
     if not path.is_file():
@@ -29,6 +32,18 @@ def main(argv: list[str] | None = None) -> int:
         default="config.yaml",
         help="Caminho para o arquivo de configuração (padrão: config.yaml)",
     )
+    parser.add_argument(
+        "--stage",
+        choices=["selection", "all"],
+        default="selection",
+        help="Etapa a executar (padrão: selection)",
+    )
+    parser.add_argument(
+        "--max-candidates",
+        type=int,
+        default=None,
+        help="Limita quantos candidatos da busca serão avaliados (útil para testes)",
+    )
     args = parser.parse_args(argv)
 
     token = os.environ.get("GITHUB_TOKEN")
@@ -48,10 +63,42 @@ def main(argv: list[str] | None = None) -> int:
 
     window = config.get("observation_window", {})
     sample = config.get("sample", {})
+    paths = config.get("paths", {})
+    github = config.get("github", {})
 
-    print("Pipeline DORA — estrutura base pronta (Lab03S01).")
+    print("Pipeline DORA — Lab03S01")
     print(f"  config: {args.config}")
+    print(f"  stage: {args.stage}")
     print(f"  janela: {window.get('start')} → {window.get('end')}")
     print(f"  amostra alvo: {sample.get('target_size')} repositórios")
-    print("Próximos passos: coletores de seleção, releases e workflow runs.")
+
+    if args.stage in {"selection", "all"}:
+        client = GitHubClient(
+            token,
+            api_base_url=str(github.get("api_base_url") or "https://api.github.com"),
+            per_page=int(github.get("per_page") or 100),
+        )
+        print("Executando seleção de repositórios e funil de inclusão…")
+        result = run_selection(
+            client,
+            config,
+            max_candidates=args.max_candidates,
+        )
+        output_dir = Path(paths.get("output_dir") or "data/output")
+        written = write_selection_outputs(result, output_dir)
+
+        print("Funil:")
+        for stage in result.funnel.stages:
+            print(f"  {stage['etapa']}: {stage['quantidade']}")
+        print("Arquivos gerados:")
+        for label, path in written.items():
+            print(f"  {label}: {path}")
+
+        if result.funnel.sample < int(sample.get("target_size") or 100):
+            print(
+                "Aviso: amostra abaixo da meta. Amplie star_ranges / "
+                "max-candidates ou rode de novo com mais cota de API.",
+                file=sys.stderr,
+            )
+
     return 0
