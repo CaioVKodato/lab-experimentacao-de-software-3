@@ -1,0 +1,24 @@
+# Configuração do pipeline de mineração das métricas DORA (Lab03).
+# Ajuste a janela quando o professor publicar as datas oficiais do Lab03S01.
+
+observation_window:
+  # Janela de 12 meses — placeholder até as datas oficiais
+  start: "2025-10-01"
+  end: "2026-09-30"
+
+sample:
+  # Meta Lab03S01: 100 repositórios após os filtros
+  target_size: 100
+  # Critérios mínimos de inclusão (seção 3 do enunciado)
+  min_releases: 5
+  min_workflow_runs: 50
+
+github:
+  # Token lido da variável de ambiente GITHUB_TOKEN (nunca commitado)
+  api_base_url: "https://api.github.com"
+  per_page: 100
+  search_query: "stars:>1000"
+
+paths:
+  cache_dir: "data/cache"
+  output_dir: "data/output"
