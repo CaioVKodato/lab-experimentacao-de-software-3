@@ -1,0 +1,32 @@
+# Ambiente e segredos
+.env
+.venv/
+venv/
+env/
+code/.env
+
+# Cache da coleta e artefatos locais
+code/data/cache/
+code/data/raw/
+code/data/output/
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# IDE / SO
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
