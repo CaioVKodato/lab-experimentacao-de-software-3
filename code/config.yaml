@@ -17,7 +17,19 @@ github:
   # Token lido da variável de ambiente GITHUB_TOKEN (nunca commitado)
   api_base_url: "https://api.github.com"
   per_page: 100
-  search_query: "stars:>1000"
+  # Fatiamento por estrelas para ultrapassar o teto de 1.000 resultados/consulta
+  star_ranges:
+    - { min: 1000, max: 2000 }
+    - { min: 2001, max: 5000 }
+    - { min: 5001, max: 10000 }
+    - { min: 10001, max: 25000 }
+    - { min: 25001, max: 50000 }
+    - { min: 50001, max: 100000 }
+    - { min: 100001, max: null }
+  # Qualquer cláusula extra na query de busca (opcional)
+  search_extra_query: ""
+  # Para ao atingir este nº de candidatos na busca (economiza cota)
+  max_search_candidates: 500
 
 paths:
   cache_dir: "data/cache"
