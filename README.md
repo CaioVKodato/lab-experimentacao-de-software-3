@@ -60,13 +60,27 @@ Saídas da seleção (em `code/data/output/`):
 
 A busca usa fatiamento por faixas de estrelas (`github.star_ranges` no `config.yaml`) para ultrapassar o limite de 1.000 resultados por consulta da Search API.
 
+### Metadados da amostra (Issue #3)
+
+Depois da seleção:
+
+```bash
+python -m pipeline --config config.yaml --stage metadata
+```
+
+Isso lê `data/output/sample_repos.csv`, busca na API (com cache JSON em `data/cache/metadata/`) e gera `data/output/repo_metadata.csv` com estrelas, linguagem, contribuidores (contagem via `Link` + `per_page=1`), `created_at`, idade em dias (até o fim da janela) e `default_branch`.
+
+Para forçar nova coleta ignorando o cache: `--force-metadata`.
+
 ## Estrutura
 
 ```
 code/
   pipeline/       # orquestração e coleta (API REST/GraphQL própria)
     github_client.py  # cliente HTTP mínimo (cache/backoff na Issue #4)
+    cache.py          # cache JSON local / retomada
     selection.py      # seleção + funil de inclusão (Issue #2)
+    metadata.py       # metadados da amostra (Issue #3)
   metricas/       # cálculo das métricas DORA
   tests/          # testes unitários (pytest)
   config.yaml     # janela, amostra alvo e caminhos

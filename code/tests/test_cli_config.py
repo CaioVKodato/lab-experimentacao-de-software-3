@@ -57,3 +57,23 @@ def test_main_runs_selection_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert code == 0
     mocked.assert_called_once()
     written.assert_called_once()
+
+
+def test_main_runs_metadata_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token-for-tests")
+    monkeypatch.chdir(tmp_path)
+
+    with patch(
+        "pipeline.cli.run_metadata_collection",
+        return_value=([], tmp_path / "repo_metadata.csv"),
+    ) as mocked:
+        code = main(
+            [
+                "--config",
+                str(ROOT / "config.yaml"),
+                "--stage",
+                "metadata",
+            ]
+        )
+    assert code == 0
+    mocked.assert_called_once()

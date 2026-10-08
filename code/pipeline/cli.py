@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 from pipeline.github_client import GitHubClient
+from pipeline.metadata import run_metadata_collection
 from pipeline.selection import run_selection, write_selection_outputs
 
 
@@ -23,6 +24,14 @@ def load_config(path: Path) -> dict:
     return data
 
 
+def _build_client(token: str, github: dict) -> GitHubClient:
+    return GitHubClient(
+        token,
+        api_base_url=str(github.get("api_base_url") or "https://api.github.com"),
+        per_page=int(github.get("per_page") or 100),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Pipeline de mineração de métricas DORA a partir da API do GitHub."
@@ -34,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--stage",
-        choices=["selection", "all"],
+        choices=["selection", "metadata", "all"],
         default="selection",
         help="Etapa a executar (padrão: selection)",
     )
@@ -43,6 +52,16 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help="Limita quantos candidatos da busca serão avaliados (útil para testes)",
+    )
+    parser.add_argument(
+        "--sample-csv",
+        default=None,
+        help="CSV da amostra para --stage metadata (padrão: data/output/sample_repos.csv)",
+    )
+    parser.add_argument(
+        "--force-metadata",
+        action="store_true",
+        help="Ignora cache JSON e recoleta metadados da API",
     )
     args = parser.parse_args(argv)
 
@@ -65,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     sample = config.get("sample", {})
     paths = config.get("paths", {})
     github = config.get("github", {})
+    client = _build_client(token, github)
 
     print("Pipeline DORA — Lab03S01")
     print(f"  config: {args.config}")
@@ -73,11 +93,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  amostra alvo: {sample.get('target_size')} repositórios")
 
     if args.stage in {"selection", "all"}:
-        client = GitHubClient(
-            token,
-            api_base_url=str(github.get("api_base_url") or "https://api.github.com"),
-            per_page=int(github.get("per_page") or 100),
-        )
         print("Executando seleção de repositórios e funil de inclusão…")
         result = run_selection(
             client,
@@ -100,5 +115,22 @@ def main(argv: list[str] | None = None) -> int:
                 "max-candidates ou rode de novo com mais cota de API.",
                 file=sys.stderr,
             )
+
+    if args.stage in {"metadata", "all"}:
+        print("Executando coleta de metadados da amostra…")
+        try:
+            rows, csv_path = run_metadata_collection(
+                client,
+                config,
+                sample_csv=Path(args.sample_csv) if args.sample_csv else None,
+                force=args.force_metadata,
+            )
+        except (OSError, ValueError, FileNotFoundError) as exc:
+            print(f"Erro na coleta de metadados: {exc}", file=sys.stderr)
+            return 1
+
+        cached = sum(1 for row in rows if row.from_cache)
+        print(f"  repositórios: {len(rows)} (cache hit: {cached})")
+        print(f"  CSV: {csv_path}")
 
     return 0
