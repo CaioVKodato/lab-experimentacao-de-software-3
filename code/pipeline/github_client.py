@@ -71,6 +71,8 @@ class GitHubClient:
                 continue
             if response.status_code >= 400:
                 raise GitHubAPIError(response.status_code, response.text[:300])
+            if response.status_code == 204 or not response.content:
+                return None, dict(response.headers)
             return response.json(), dict(response.headers)
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
