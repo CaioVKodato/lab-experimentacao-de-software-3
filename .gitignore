@@ -24,6 +24,9 @@ htmlcov/
 dist/
 build/
 
+# Claude Code
+.claude/
+
 # IDE / SO
 .idea/
 .vscode/
