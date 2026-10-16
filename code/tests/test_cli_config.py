@@ -20,6 +20,8 @@ def test_load_config_yaml():
     assert config["sample"]["min_releases"] == 5
     assert config["sample"]["min_workflow_runs"] == 50
     assert "star_ranges" in config["github"]
+    assert config["validation"]["n_repos"] == 60
+    assert config["validation"]["random_state_repos"] == 42
 
 
 def test_main_requires_github_token(monkeypatch: pytest.MonkeyPatch):
@@ -66,3 +68,28 @@ def test_main_single_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         )
     assert code == 0
     assert mocked.call_args.kwargs["stages"] == ["metadata"]
+
+
+def test_main_amostra_ouro_sem_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    with patch(
+        "pipeline.cli.run_amostra_ouro",
+        return_value={
+            "n_repos": 60,
+            "n_releases": 300,
+            "meta_csv": tmp_path / "meta.csv",
+            "planilhas": {"CaioVKodato": tmp_path / "p.csv"},
+        },
+    ) as mocked:
+        code = main(
+            [
+                "--config",
+                str(ROOT / "config.yaml"),
+                "--stage",
+                "amostra-ouro",
+            ]
+        )
+    assert code == 0
+    mocked.assert_called_once()
