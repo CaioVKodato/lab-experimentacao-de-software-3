@@ -1,0 +1,50 @@
+% Fragmento da Introdução para o template SBC (Overleaf).
+% Issue #12 — colar no corpo do artigo. Atualize o link do projeto Overleaf no README.
+
+\section{Introdução}
+
+As métricas DORA (\textit{DevOps Research and Assessment}) tornaram-se referência
+para avaliar o desempenho de entrega de software. Popularizadas por
+\textit{Accelerate}~\cite{forsgren2018accelerate} e atualizadas pelos relatórios
+\textit{Accelerate State of DevOps}, as quatro métricas clássicas --- frequência
+de deploy, \textit{lead time for changes}, taxa de falha de mudança
+(\textit{change failure rate}, CFR) e tempo de recuperação --- capturam
+\textit{throughput} e estabilidade.
+
+Medir essas métricas em repositórios \textit{open source} exige
+\textbf{proxies}: o GitHub não registra ``deploy em produção'' nem ``falha em
+produção''. Releases publicadas e execuções de CI/CD (GitHub Actions) aproximam
+entrega e falha, mas podem distorcer conclusões. Por isso, além de calcular as
+métricas, este trabalho valida heurísticas automáticas contra julgamento humano
+e avalia a sensibilidade das classificações DORA a mudanças nas definições
+operacionais.
+
+O objetivo é minerar as métricas DORA a partir de repositórios populares que
+usam GitHub Actions, com definições operacionais alinhadas à turma, produzir um
+\textit{pipeline} reprodutível e discutir hipóteses informais \textbf{antes} da
+análise dos dados.
+
+\subsection*{Hipóteses informais}
+
+\begin{itemize}
+  \item \textbf{RQ\,01 (A):} poucos repositórios alcançarão frequência
+    \textit{Elite}; a mediana tenderá a \textit{Medium}/\textit{High}.
+  \item \textbf{RQ\,02 (B):} lead time (a) $>$ lead time (b), por commits
+    antigos que inflam a variante por release.
+  \item \textbf{RQ\,03a (C):} CFR de CI $>$ CFR de entrega (falhas de
+    \textit{pipeline} $\neq$ falhas em produção).
+  \item \textbf{RQ\,03b (B):} CFR (b) concentrará repositórios em
+    \textit{Elite}/\textit{High}, sujeita à heurística de release corretiva.
+  \item \textbf{RQ\,04 (C):} recuperação tipicamente em horas a poucos dias, com
+    censura não desprezível.
+  \item \textbf{RQ\,05 (B):} correlação Spearman entre frequência de deploy e CFR
+    fraca ou nula (sem \textit{trade-off} forte).
+  \item \textbf{RQ\,06 (A):} ao menos um fator
+    (linguagem/estrelas/contribuidores/idade/tipo) diferenciará alguma métrica,
+    com efeito pequeno a moderado.
+  \item \textbf{RQ\,07 (C):} mudança relevante de categoria DORA entre
+    definições; kappa ponderado no máximo moderado.
+\end{itemize}
+
+% Nota: adicione a entrada forsgren2018accelerate na bibliografia do template,
+% ou ajuste a citação conforme o .bib do grupo.

@@ -10,8 +10,16 @@ from pathlib import Path
 import yaml
 
 from pipeline.github_client import GitHubClient
-from pipeline.metadata import run_metadata_collection
-from pipeline.selection import run_selection, write_selection_outputs
+from pipeline.orchestrator import run_full_pipeline
+
+STAGE_CHOICES = [
+    "selection",
+    "metadata",
+    "releases",
+    "compare",
+    "workflow-runs",
+    "all",
+]
 
 
 def load_config(path: Path) -> dict:
@@ -34,7 +42,10 @@ def _build_client(token: str, github: dict) -> GitHubClient:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Pipeline de mineração de métricas DORA a partir da API do GitHub."
+        description=(
+            "Pipeline de mineração de métricas DORA a partir da API do GitHub. "
+            "Comando único: python -m pipeline --config config.yaml"
+        )
     )
     parser.add_argument(
         "--config",
@@ -43,25 +54,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--stage",
-        choices=["selection", "metadata", "all"],
-        default="selection",
-        help="Etapa a executar (padrão: selection)",
+        choices=STAGE_CHOICES,
+        default="all",
+        help=(
+            "Etapa a executar (padrão: all = seleção + metadados + releases + "
+            "compare + workflow-runs)"
+        ),
     )
     parser.add_argument(
         "--max-candidates",
         type=int,
         default=None,
-        help="Limita quantos candidatos da busca serão avaliados (útil para testes)",
+        help="Limita candidatos avaliados na seleção (útil para testes)",
     )
     parser.add_argument(
         "--sample-csv",
         default=None,
-        help="CSV da amostra para --stage metadata (padrão: data/output/sample_repos.csv)",
+        help="CSV da amostra (padrão: data/output/sample_repos.csv)",
     )
     parser.add_argument(
-        "--force-metadata",
+        "--force",
         action="store_true",
-        help="Ignora cache JSON e recoleta metadados da API",
+        help="Ignora cache JSON e recoleta da API nas etapas aplicáveis",
     )
     args = parser.parse_args(argv)
 
@@ -82,55 +96,53 @@ def main(argv: list[str] | None = None) -> int:
 
     window = config.get("observation_window", {})
     sample = config.get("sample", {})
-    paths = config.get("paths", {})
     github = config.get("github", {})
     client = _build_client(token, github)
 
-    print("Pipeline DORA — Lab03S01")
+    print("Pipeline DORA — Lab03")
     print(f"  config: {args.config}")
     print(f"  stage: {args.stage}")
     print(f"  janela: {window.get('start')} → {window.get('end')}")
     print(f"  amostra alvo: {sample.get('target_size')} repositórios")
 
-    if args.stage in {"selection", "all"}:
-        print("Executando seleção de repositórios e funil de inclusão…")
-        result = run_selection(
+    stages = None if args.stage == "all" else [args.stage]
+    sample_csv = Path(args.sample_csv) if args.sample_csv else None
+
+    try:
+        report = run_full_pipeline(
             client,
             config,
             max_candidates=args.max_candidates,
+            sample_csv=sample_csv,
+            force=args.force,
+            stages=stages,
         )
-        output_dir = Path(paths.get("output_dir") or "data/output")
-        written = write_selection_outputs(result, output_dir)
+    except (OSError, ValueError, FileNotFoundError) as exc:
+        print(f"Erro no pipeline: {exc}", file=sys.stderr)
+        return 1
 
-        print("Funil:")
-        for stage in result.funnel.stages:
-            print(f"  {stage['etapa']}: {stage['quantidade']}")
-        print("Arquivos gerados:")
-        for label, path in written.items():
-            print(f"  {label}: {path}")
+    print("Etapas:")
+    for stage in report.stages:
+        print(f"  [{stage.name}] {stage.detail}")
+        for label, path in stage.paths.items():
+            print(f"    - {label}: {path}")
 
-        if result.funnel.sample < int(sample.get("target_size") or 100):
-            print(
-                "Aviso: amostra abaixo da meta. Amplie star_ranges / "
-                "max-candidates ou rode de novo com mais cota de API.",
-                file=sys.stderr,
-            )
-
-    if args.stage in {"metadata", "all"}:
-        print("Executando coleta de metadados da amostra…")
-        try:
-            rows, csv_path = run_metadata_collection(
-                client,
-                config,
-                sample_csv=Path(args.sample_csv) if args.sample_csv else None,
-                force=args.force_metadata,
-            )
-        except (OSError, ValueError, FileNotFoundError) as exc:
-            print(f"Erro na coleta de metadados: {exc}", file=sys.stderr)
-            return 1
-
-        cached = sum(1 for row in rows if row.from_cache)
-        print(f"  repositórios: {len(rows)} (cache hit: {cached})")
-        print(f"  CSV: {csv_path}")
+    if args.stage in {"selection", "all"}:
+        # aviso de meta S01 se o manifesto de selection existir nos detalhes
+        sel = next((s for s in report.stages if s.name == "selection"), None)
+        if sel and "amostra=" in sel.detail:
+            # detail: funil amostra=N/candidatos=M
+            try:
+                part = sel.detail.split("amostra=")[1].split("/")[0]
+                n_sample = int(part)
+            except (IndexError, ValueError):
+                n_sample = -1
+            target = int(sample.get("target_size") or 100)
+            if 0 <= n_sample < target:
+                print(
+                    "Aviso: amostra abaixo da meta S01 "
+                    f"({n_sample} < {target}). Amplie a busca ou a cota da API.",
+                    file=sys.stderr,
+                )
 
     return 0

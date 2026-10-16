@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from pipeline.cli import load_config, main
-from pipeline.selection import FunnelStats, SelectionResult
+from pipeline.orchestrator import PipelineReport, StageReport
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,45 +27,34 @@ def test_main_requires_github_token(monkeypatch: pytest.MonkeyPatch):
     assert main(["--config", str(ROOT / "config.yaml")]) == 1
 
 
-def test_main_runs_selection_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_main_runs_all_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("GITHUB_TOKEN", "fake-token-for-tests")
     monkeypatch.chdir(tmp_path)
 
-    fake_result = SelectionResult(
-        sample=[],
-        funnel=FunnelStats(
-            candidates=0,
-            with_actions=0,
-            with_min_criteria=0,
-            sample=0,
-        ),
+    report = PipelineReport()
+    report.add(
+        StageReport(
+            name="selection",
+            ok=True,
+            detail="funil amostra=2/candidatos=10",
+            paths={},
+        )
     )
-    fake_result.funnel.build_stages()
 
-    with patch("pipeline.cli.run_selection", return_value=fake_result) as mocked:
-        with patch("pipeline.cli.write_selection_outputs", return_value={}) as written:
-            code = main(
-                [
-                    "--config",
-                    str(ROOT / "config.yaml"),
-                    "--stage",
-                    "selection",
-                    "--max-candidates",
-                    "5",
-                ]
-            )
+    with patch("pipeline.cli.run_full_pipeline", return_value=report) as mocked:
+        code = main(["--config", str(ROOT / "config.yaml")])
     assert code == 0
     mocked.assert_called_once()
-    written.assert_called_once()
+    assert mocked.call_args.kwargs.get("stages") is None
 
 
-def test_main_runs_metadata_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_main_single_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("GITHUB_TOKEN", "fake-token-for-tests")
     monkeypatch.chdir(tmp_path)
 
     with patch(
-        "pipeline.cli.run_metadata_collection",
-        return_value=([], tmp_path / "repo_metadata.csv"),
+        "pipeline.cli.run_full_pipeline",
+        return_value=PipelineReport(),
     ) as mocked:
         code = main(
             [
@@ -76,4 +65,4 @@ def test_main_runs_metadata_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
             ]
         )
     assert code == 0
-    mocked.assert_called_once()
+    assert mocked.call_args.kwargs["stages"] == ["metadata"]

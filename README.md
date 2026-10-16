@@ -30,63 +30,83 @@ O token **nunca** deve ser commitado. O pipeline lê apenas a variável de ambie
 
 Ajuste a janela de observação e os demais parâmetros em [`code/config.yaml`](code/config.yaml) quando o professor publicar as datas oficiais do Lab03S01.
 
-## Execução (comando único)
+## Execução (comando único) — Issue #11
 
 A partir da pasta `code/`:
 
 ```bash
 # Windows (PowerShell)
 $env:GITHUB_TOKEN = "seu_token"
-python -m pipeline --config config.yaml --stage selection
+python -m pipeline --config config.yaml
 
 # Linux/macOS
 export GITHUB_TOKEN=seu_token
-python -m pipeline --config config.yaml --stage selection
+python -m pipeline --config config.yaml
 ```
 
-Para limitar quantos candidatos da busca serão avaliados (útil enquanto a cota da API é escassa):
+O padrão `--stage all` encadeia:
 
-```bash
-python -m pipeline --config config.yaml --stage selection --max-candidates 50
-```
+1. **selection** — busca fatiada + funil (≥ 5 releases, ≥ 50 runs)
+2. **metadata** — estrelas, linguagem, contribuidores, idade, `default_branch`
+3. **releases** — releases/tags na janela
+4. **compare** — commits entre releases consecutivas
+5. **workflow-runs** — runs `push` no default branch (com bisseção do teto de 1.000)
 
-Saídas da seleção (em `code/data/output/`):
+Cache/retomada em `data/cache/`. CSVs intermediários e `pipeline_manifest.csv` em `data/output/`.
 
-| Arquivo | Conteúdo |
-|---|---|
-| `funnel.csv` / `funnel.json` | Funil: candidatos → com Actions → critério mínimo → amostra |
-| `sample_repos.csv` | Repositórios aprovados (meta S01: 100) |
-| `selection_evaluated.csv` | Log por repositório (motivo de descarte, contagens) |
-
-A busca usa fatiamento por faixas de estrelas (`github.star_ranges` no `config.yaml`) para ultrapassar o limite de 1.000 resultados por consulta da Search API.
-
-### Metadados da amostra (Issue #3)
-
-Depois da seleção:
+Etapas isoladas (ex.: só metadados):
 
 ```bash
 python -m pipeline --config config.yaml --stage metadata
 ```
 
-Isso lê `data/output/sample_repos.csv`, busca na API (com cache JSON em `data/cache/metadata/`) e gera `data/output/repo_metadata.csv` com estrelas, linguagem, contribuidores (contagem via `Link` + `per_page=1`), `created_at`, idade em dias (até o fim da janela) e `default_branch`.
+Para testar com poucos candidatos na seleção:
 
-Para forçar nova coleta ignorando o cache: `--force-metadata`.
+```bash
+python -m pipeline --config config.yaml --max-candidates 50
+```
+
+| Arquivo (em `data/output/`) | Conteúdo |
+|---|---|
+| `funnel.csv` / `funnel.json` | Funil de seleção |
+| `sample_repos.csv` | Amostra aprovada (meta S01: 100) |
+| `repo_metadata.csv` | Metadados |
+| `releases.csv` / `tags.csv` | Releases e tags |
+| `commits_between_releases.csv` | Commits do compare |
+| `workflow_runs.csv` | Runs de CI |
+| `pipeline_manifest.csv` | Resumo das etapas |
+
+## CI (Issue #10)
+
+A cada `push` e `pull_request`, [`.github/workflows/testes.yml`](.github/workflows/testes.yml) executa:
+
+```bash
+cd code
+pytest --cov=metricas --cov-report=term-missing --cov-fail-under=80
+```
+
+## Artigo — Introdução (Issue #12)
+
+Rascunho da Introdução com hipóteses informais das RQ 01–07 (antes de ver os dados):
+
+- Markdown: [`docs/artigo/introducao.md`](docs/artigo/introducao.md)
+- Fragmento LaTeX (template SBC): [`docs/artigo/introducao.tex`](docs/artigo/introducao.tex)
+
+**Overleaf do grupo:** _adicionar URL do projeto aqui após criar no [template SBC](https://www.overleaf.com/latex/templates/sbc-conferences-template/blbxwjwzdngr)._
 
 ## Estrutura
 
 ```
 code/
-  pipeline/       # orquestração e coleta (API REST/GraphQL própria)
-    github_client.py  # cliente HTTP mínimo (cache/backoff na Issue #4)
-    cache.py          # cache JSON local / retomada
-    selection.py      # seleção + funil de inclusão (Issue #2)
-    metadata.py       # metadados da amostra (Issue #3)
-  metricas/       # cálculo das métricas DORA
-  tests/          # testes unitários (pytest)
-  config.yaml     # janela, amostra alvo e caminhos
-  requirements.txt
-  .env.example
-  data/           # cache e saídas (gerado em runtime; não versionado)
+  pipeline/
+    orchestrator.py   # pipeline único (Issue #11)
+    selection.py, metadata.py, releases.py, compare.py, workflow_runs.py, …
+  metricas/
+  tests/
+  config.yaml
+  data/               # cache/saídas (não versionado)
+docs/artigo/          # Introdução (Issue #12)
+.github/workflows/    # CI (Issue #10)
 ```
 
 ## Testes
