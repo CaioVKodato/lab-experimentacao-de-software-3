@@ -34,3 +34,16 @@ github:
 paths:
   cache_dir: "data/cache"
   output_dir: "data/output"
+  # Relativo a code/ — planilhas versionáveis na raiz do repositório
+  validacao_dir: "../validacao"
+
+# Amostra-ouro (Issue #23) — sementes fixas para reprodutibilidade
+validation:
+  n_repos: 60
+  n_releases_per_repo: 5
+  random_state_repos: 42
+  random_state_releases: 42
+  evaluators:
+    - CaioVKodato
+    - Henrique-volponi
+    - Kjonps

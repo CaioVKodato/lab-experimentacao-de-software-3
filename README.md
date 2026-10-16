@@ -100,14 +100,26 @@ Rascunho da Introdução com hipóteses informais das RQ 01–07 (antes de ver o
 code/
   pipeline/
     orchestrator.py   # pipeline único (Issue #11)
+    amostra_ouro.py   # sorteio amostra-ouro (Issue #23)
     selection.py, metadata.py, releases.py, compare.py, workflow_runs.py, …
   metricas/
   tests/
   config.yaml
   data/               # cache/saídas (não versionado)
+validacao/            # planilhas amostra-ouro (Issue #23)
 docs/artigo/          # Introdução (Issue #12)
 .github/workflows/    # CI (Issue #10)
 ```
+
+## Amostra-ouro (Issue #23)
+
+Com `sample_repos.csv` (≥ 60) e `releases.csv`:
+
+```bash
+python -m pipeline --config config.yaml --stage amostra-ouro
+```
+
+Saídas em [`validacao/`](validacao/). Ver [`validacao/README.md`](validacao/README.md).
 
 ## Testes
 

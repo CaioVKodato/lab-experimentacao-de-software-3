@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from pipeline.amostra_ouro import run_amostra_ouro
 from pipeline.github_client import GitHubClient
 from pipeline.orchestrator import run_full_pipeline
 
@@ -18,9 +19,9 @@ STAGE_CHOICES = [
     "releases",
     "compare",
     "workflow-runs",
+    "amostra-ouro",
     "all",
 ]
-
 
 def load_config(path: Path) -> dict:
     if not path.is_file():
@@ -58,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
         default="all",
         help=(
             "Etapa a executar (padrão: all = seleção + metadados + releases + "
-            "compare + workflow-runs)"
+            "compare + workflow-runs). Use amostra-ouro para as planilhas."
         ),
     )
     parser.add_argument(
@@ -79,15 +80,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token:
-        print(
-            "Erro: defina a variável de ambiente GITHUB_TOKEN "
-            "(veja .env.example em code/). O token não deve ser commitado.",
-            file=sys.stderr,
-        )
-        return 1
-
     try:
         config = load_config(Path(args.config))
     except (OSError, ValueError) as exc:
@@ -97,7 +89,6 @@ def main(argv: list[str] | None = None) -> int:
     window = config.get("observation_window", {})
     sample = config.get("sample", {})
     github = config.get("github", {})
-    client = _build_client(token, github)
 
     print("Pipeline DORA — Lab03")
     print(f"  config: {args.config}")
@@ -105,6 +96,30 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  janela: {window.get('start')} → {window.get('end')}")
     print(f"  amostra alvo: {sample.get('target_size')} repositórios")
 
+    if args.stage == "amostra-ouro":
+        print("Sorteando amostra-ouro e gerando planilhas de rotulagem…")
+        try:
+            result = run_amostra_ouro(config)
+        except (OSError, ValueError, FileNotFoundError) as exc:
+            print(f"Erro na amostra-ouro: {exc}", file=sys.stderr)
+            return 1
+        print(f"  repos sorteados: {result['n_repos']}")
+        print(f"  releases sorteadas: {result['n_releases']}")
+        print(f"  meta: {result['meta_csv']}")
+        for name, path in result["planilhas"].items():
+            print(f"  planilha {name}: {path}")
+        return 0
+
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        print(
+            "Erro: defina a variável de ambiente GITHUB_TOKEN "
+            "(veja .env.example em code/). O token não deve ser commitado.",
+            file=sys.stderr,
+        )
+        return 1
+
+    client = _build_client(token, github)
     stages = None if args.stage == "all" else [args.stage]
     sample_csv = Path(args.sample_csv) if args.sample_csv else None
 
@@ -128,10 +143,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    - {label}: {path}")
 
     if args.stage in {"selection", "all"}:
-        # aviso de meta S01 se o manifesto de selection existir nos detalhes
         sel = next((s for s in report.stages if s.name == "selection"), None)
         if sel and "amostra=" in sel.detail:
-            # detail: funil amostra=N/candidatos=M
             try:
                 part = sel.detail.split("amostra=")[1].split("/")[0]
                 n_sample = int(part)
