@@ -294,3 +294,105 @@ def test_run_releases_collection_levanta_sem_amostra(tmp_path: Path):
     }
     with pytest.raises(FileNotFoundError):
         run_releases_collection(client, config)
+
+
+# ---------------------------------------------------------------------------
+# Histórico completo e cache sensível à janela (Issue #20)
+# ---------------------------------------------------------------------------
+
+from dataclasses import asdict  # noqa: E402
+
+from metricas.janela import parse_janela  # noqa: E402
+from metricas.lead_time import selecionar_pares  # noqa: E402
+from pipeline.releases import CACHE_VERSAO, _parse_historico  # noqa: E402
+
+JANELA = parse_janela(*WINDOW)
+
+
+def _client_com_historico():
+    return FakeClient(
+        releases=[
+            _release("v0.9", "2025-09-01T00:00:00Z"),  # antes da janela
+            _release("v1.0", "2026-01-15T00:00:00Z"),  # dentro
+            _release("v1.1", "2026-10-01T00:00:00Z"),  # depois
+            _release("v0.8", "2025-08-01T00:00:00Z", draft=True),
+        ],
+        tags=[],
+    )
+
+
+def test_parse_historico_guarda_qualquer_epoca_e_descarta_draft_e_sem_data():
+    raw = [
+        _release("v0.9", "2025-09-01T00:00:00Z"),
+        _release("v1.0", "2026-01-15T00:00:00Z"),
+        _release("v1.1", "2026-10-01T00:00:00Z"),
+        _release("rascunho", "2026-02-01T00:00:00Z", draft=True),
+        {"tag_name": "sem-data", "draft": False, "prerelease": False, "published_at": None},
+    ]
+    assert [r.tag_name for r in _parse_historico(raw, "o/r")] == ["v0.9", "v1.0", "v1.1"]
+
+
+def test_releases_continua_so_com_a_janela_e_historico_tem_tudo(cache: JsonCache):
+    result = collect_repo_releases(_client_com_historico(), "o", "r", cache=cache,
+                                   window_start=WINDOW[0], window_end=WINDOW[1])
+    assert [r.tag_name for r in result.releases] == ["v1.0"]
+    assert [r.tag_name for r in result.historico] == ["v0.9", "v1.0", "v1.1"]
+
+
+def test_historico_sobrevive_ao_cache(cache: JsonCache):
+    client = _client_com_historico()
+    collect_repo_releases(client, "o", "r", cache=cache, window_start=WINDOW[0], window_end=WINDOW[1])
+    segundo = collect_repo_releases(client, "o", "r", cache=cache, window_start=WINDOW[0], window_end=WINDOW[1])
+    assert segundo.from_cache is True and len(client.calls) == 2
+    assert [r.tag_name for r in segundo.historico] == ["v0.9", "v1.0", "v1.1"]
+
+
+def test_cache_grava_a_versao_e_a_janela(cache: JsonCache):
+    collect_repo_releases(_client_com_historico(), "o", "r", cache=cache,
+                          window_start=WINDOW[0], window_end=WINDOW[1])
+    payload = cache.load("releases/o/r.json")
+    assert payload["versao"] == CACHE_VERSAO and payload["janela"] == list(WINDOW)
+
+
+def test_janela_diferente_nao_reaproveita_o_cache(cache: JsonCache):
+    # As datas do config.yaml são provisórias; quando o professor publicar as oficiais,
+    # um cache da janela antiga não pode ser lido como se fosse da nova.
+    client = _client_com_historico()
+    collect_repo_releases(client, "o", "r", cache=cache, window_start="2025-10-01", window_end="2026-09-30")
+    nova = collect_repo_releases(client, "o", "r", cache=cache, window_start="2025-08-15", window_end="2026-08-14")
+    assert nova.from_cache is False and len(client.calls) == 4
+    assert [r.tag_name for r in nova.releases] == ["v0.9", "v1.0"]
+
+
+def test_cache_antigo_sem_historico_e_refeito(cache: JsonCache):
+    cache.save("releases/o/r.json", {"full_name": "o/r", "tags": [], "releases": [
+        {"full_name": "o/r", "tag_name": "v1.0", "name": "v1.0", "published_at": "2026-01-15T00:00:00Z",
+         "prerelease": False, "html_url": ""}]})
+    client = _client_com_historico()
+    result = collect_repo_releases(client, "o", "r", cache=cache, window_start=WINDOW[0], window_end=WINDOW[1])
+    assert result.from_cache is False and len(result.historico) == 3
+
+
+def test_com_o_historico_a_primeira_release_da_janela_ganha_o_par_anterior(cache: JsonCache):
+    result = collect_repo_releases(_client_com_historico(), "o", "r", cache=cache,
+                                   window_start=WINDOW[0], window_end=WINDOW[1])
+    so_janela = selecionar_pares([asdict(r) for r in result.releases], JANELA)
+    com_historico = selecionar_pares([asdict(r) for r in result.historico], JANELA)
+    assert so_janela == []  # o comportamento anterior: v1.0 parecia a primeira da história
+    assert [(a["tag_name"], b["tag_name"]) for a, b in com_historico] == [("v0.9", "v1.0")]
+
+
+def test_csv_de_historico_inclui_o_que_o_csv_da_janela_exclui(tmp_path: Path, cache: JsonCache):
+    result = collect_repo_releases(_client_com_historico(), "o", "r", cache=cache,
+                                   window_start=WINDOW[0], window_end=WINDOW[1])
+    releases_path, _ = write_releases_csv([result], tmp_path / "out")
+    historico_path = tmp_path / "out" / "releases_historico.csv"
+    na_janela = releases_path.read_text(encoding="utf-8")
+    historico = historico_path.read_text(encoding="utf-8")
+    assert "v0.9" not in na_janela and "v1.0" in na_janela  # contrato antigo preservado
+    assert "v0.9" in historico and "v1.0" in historico and "v1.1" in historico
+
+
+def test_csv_de_historico_vazio_tem_cabecalho(tmp_path: Path):
+    write_releases_csv([], tmp_path / "out")
+    assert (tmp_path / "out" / "releases_historico.csv").read_text(encoding="utf-8").startswith("full_name")
