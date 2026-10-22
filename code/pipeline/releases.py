@@ -3,16 +3,28 @@
 Coleta releases não-rascunho publicados dentro da janela de observação.
 Pre-releases são incluídos mas identificados com `prerelease=True` para uso
 futuro. Tags são coletadas via endpoint próprio. Cache e retomada por JSON.
+
+Histórico completo (Issue #20): `releases` continua sendo só a janela, mas o
+resultado também traz `historico` (todas as releases não-rascunho, de qualquer
+época). O enunciado diz que a release anterior pode estar FORA da janela, e é dela
+que sai o par `anterior...R` da primeira release da janela; sem o histórico, essa
+release parecia a primeira da história e perdia o lead time. A API já devolve todas
+as releases (a janela só filtrava depois), então isso não custa chamadas.
+
+O cache é versionado e guarda a janela: as datas do config.yaml são provisórias, e
+um cache de outra janela não pode ser lido como se fosse da atual.
 """
 
 from __future__ import annotations
 
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from pipeline.cache import JsonCache
+
+CACHE_VERSAO = 2  # v1 = só as releases da janela, sem histórico e sem registro da janela
 
 
 class _Cliente(Protocol):
@@ -46,9 +58,10 @@ class Tag:
 @dataclass
 class ReleasesResult:
     full_name: str
-    releases: list[Release]
+    releases: list[Release]  # só as publicadas dentro da janela
     tags: list[Tag]
     from_cache: bool = False
+    historico: list[Release] = field(default_factory=list)  # todas, de qualquer época
 
 
 _RELEASE_FIELDS = ["full_name", "tag_name", "name", "published_at", "prerelease", "html_url"]
@@ -87,6 +100,22 @@ def _parse_releases(
     return releases
 
 
+def _parse_historico(raw: list[dict[str, Any]], full_name: str) -> list[Release]:
+    """Todas as releases não-rascunho com data, sem filtrar por janela."""
+    return [
+        Release(
+            full_name=full_name,
+            tag_name=item.get("tag_name") or "",
+            name=item.get("name"),
+            published_at=item["published_at"],
+            prerelease=bool(item.get("prerelease", False)),
+            html_url=item.get("html_url") or "",
+        )
+        for item in raw
+        if not item.get("draft") and item.get("published_at")
+    ]
+
+
 def _parse_tags(raw: list[dict[str, Any]], full_name: str) -> list[Tag]:
     return [
         Tag(
@@ -114,27 +143,39 @@ def collect_repo_releases(
 
     if not force:
         cached = cache.load(cache_key)
-        if isinstance(cached, dict) and cached.get("full_name") == full_name:
+        if (
+            isinstance(cached, dict)
+            and cached.get("versao") == CACHE_VERSAO
+            and cached.get("janela") == [window_start, window_end]
+            and cached.get("full_name") == full_name
+        ):
             return ReleasesResult(
                 full_name=full_name,
                 releases=[Release(**r) for r in (cached.get("releases") or [])],
                 tags=[Tag(**t) for t in (cached.get("tags") or [])],
                 from_cache=True,
+                historico=[Release(**r) for r in (cached.get("historico") or [])],
             )
 
     raw_releases = client.paginate(f"/repos/{owner}/{name}/releases")
     releases = _parse_releases(raw_releases, full_name, window_start, window_end)
+    historico = _parse_historico(raw_releases, full_name)
 
     raw_tags = client.paginate(f"/repos/{owner}/{name}/tags")
     tags = _parse_tags(raw_tags, full_name)
 
     cache.save(cache_key, {
+        "versao": CACHE_VERSAO,
+        "janela": [window_start, window_end],
         "full_name": full_name,
         "releases": [asdict(r) for r in releases],
+        "historico": [asdict(r) for r in historico],
         "tags": [asdict(t) for t in tags],
     })
 
-    return ReleasesResult(full_name=full_name, releases=releases, tags=tags, from_cache=False)
+    return ReleasesResult(
+        full_name=full_name, releases=releases, tags=tags, from_cache=False, historico=historico
+    )
 
 
 def collect_sample_releases(
@@ -172,6 +213,15 @@ def write_releases_csv(results: list[ReleasesResult], output_dir: Path) -> tuple
         w.writeheader()
         for result in results:
             for rel in result.releases:
+                w.writerow(asdict(rel))
+
+    # Efeito colateral documentado: releases_historico.csv (todas as épocas) ao lado do
+    # releases.csv (só a janela). O retorno continua sendo (releases_path, tags_path).
+    with (output_dir / "releases_historico.csv").open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=_RELEASE_FIELDS)
+        w.writeheader()
+        for result in results:
+            for rel in result.historico:
                 w.writerow(asdict(rel))
 
     with tags_path.open("w", encoding="utf-8", newline="") as fh:
