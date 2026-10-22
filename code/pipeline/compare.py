@@ -11,6 +11,11 @@ cálculo de lead time e contabilizados em `nao_encontrados`.
 
 Cache: cada par (base, head) é persistido em JSON; rodar de novo após uma
 queda retoma de onde parou sem repetir chamadas.
+
+Mensagem do commit (Issue #20): a heurística de CFR (b) procura `fix`, `hotfix` e
+`revert` na mensagem, então cada commit guarda `message` (truncada em MAX_MENSAGEM).
+O cache é VERSIONADO: entradas gravadas antes dessa mudança não têm a mensagem e são
+refeitas em vez de lidas como mensagem vazia, o que degradaria a heurística sem erro.
 """
 
 from __future__ import annotations
@@ -22,6 +27,9 @@ from typing import Any, Protocol
 
 from pipeline.cache import JsonCache
 from pipeline.github_client import GitHubAPIError
+
+CACHE_VERSAO = 2        # v1 = commits só com sha e data (sem mensagem)
+MAX_MENSAGEM = 1000     # limita o tamanho do cache; sobra de sobra para achar fix/hotfix/revert
 
 
 class _Cliente(Protocol):
@@ -39,6 +47,15 @@ class _Cliente(Protocol):
 class CommitEntry:
     sha: str
     author_date: str  # commit.author.date (ISO 8601)
+    message: str = ""  # commit.message, truncada em MAX_MENSAGEM
+
+    def as_api(self) -> dict[str, Any]:
+        """Formato cru da API (`commit.message`, `commit.author.date`), que é o que
+        as funções de métricas (lead time e CFR) consomem."""
+        return {
+            "sha": self.sha,
+            "commit": {"message": self.message, "author": {"date": self.author_date}},
+        }
 
 
 @dataclass
@@ -65,7 +82,8 @@ def _extract_commit(raw: dict[str, Any]) -> CommitEntry:
         .get("author", {})
         .get("date") or ""
     )
-    return CommitEntry(sha=sha, author_date=author_date)
+    message = ((raw.get("commit") or {}).get("message") or "")[:MAX_MENSAGEM]
+    return CommitEntry(sha=sha, author_date=author_date, message=message)
 
 
 def collect_commits_between(
@@ -88,7 +106,11 @@ def collect_commits_between(
 
     if not force:
         cached = cache.load(key)
-        if isinstance(cached, dict) and cached.get("full_name") == full_name:
+        if (
+            isinstance(cached, dict)
+            and cached.get("versao") == CACHE_VERSAO
+            and cached.get("full_name") == full_name
+        ):
             return CompareResult(
                 full_name=full_name,
                 base_tag=base_tag,
@@ -111,6 +133,7 @@ def collect_commits_between(
                 not_found=True,
             )
             cache.save(key, {
+                "versao": CACHE_VERSAO,
                 "full_name": full_name,
                 "commits": [],
                 "not_found": True,
@@ -127,6 +150,7 @@ def collect_commits_between(
         not_found=False,
     )
     cache.save(key, {
+        "versao": CACHE_VERSAO,
         "full_name": full_name,
         "commits": [asdict(c) for c in commits],
         "not_found": False,
