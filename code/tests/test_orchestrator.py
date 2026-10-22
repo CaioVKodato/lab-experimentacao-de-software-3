@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -65,6 +66,8 @@ def test_run_compare_collection(tmp_path: Path):
                 "html_url": "",
             }
         )
+
+    shutil.copy(out / "releases.csv", out / "releases_historico.csv")  # a coleta lê o histórico
 
     fake_result = MagicMock()
     fake_result.not_found = False
@@ -182,3 +185,62 @@ def test_run_full_pipeline_all_stages(tmp_path: Path):
         "workflow-runs",
     ]
     assert (out / "pipeline_manifest.csv").is_file()
+
+
+# ---------------------------------------------------------------------------
+# Pares a partir do histórico completo e das duas variantes (Issue #20)
+# ---------------------------------------------------------------------------
+
+import pytest  # noqa: E402
+
+
+def _escrever_releases_csv(caminho: Path, linhas: list[tuple[str, str, bool]]) -> None:
+    with caminho.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(
+            fh, fieldnames=["full_name", "tag_name", "name", "published_at", "prerelease", "html_url"]
+        )
+        w.writeheader()
+        for tag, publicada, pre in linhas:
+            w.writerow({"full_name": "org/demo", "tag_name": tag, "name": "",
+                        "published_at": publicada, "prerelease": str(pre), "html_url": ""})
+
+
+def _preparar_saida(tmp_path: Path) -> tuple[Path, dict]:
+    out = tmp_path / "output"
+    out.mkdir()
+    (out / "sample_repos.csv").write_text("full_name,default_branch\norg/demo,main\n", encoding="utf-8")
+    config = {
+        "paths": {"output_dir": str(out), "cache_dir": str(tmp_path / "cache")},
+        "observation_window": {"start": "2025-10-01", "end": "2026-09-30"},
+    }
+    return out, config
+
+
+def test_compare_pede_os_pares_das_duas_variantes_incluindo_a_release_anterior_a_janela(tmp_path: Path):
+    out, config = _preparar_saida(tmp_path)
+    _escrever_releases_csv(out / "releases_historico.csv", [
+        ("v0", "2025-09-01T00:00:00Z", False),     # ANTES da janela: é a base do par da primeira release
+        ("v1", "2025-11-01T00:00:00Z", False),
+        ("v1-rc", "2025-12-01T00:00:00Z", True),
+        ("v2", "2026-01-01T00:00:00Z", False),
+    ])
+    with patch("pipeline.orchestrator.collect_repo_commits_between_releases", return_value=[]) as coleta:
+        run_compare_collection(MagicMock(), config)
+    pares = coleta.call_args.args[3]
+    assert pares == [("v0", "v1"), ("v1", "v1-rc"), ("v1", "v2"), ("v1-rc", "v2")]
+
+
+def test_compare_sem_o_historico_falha_com_mensagem_clara_em_vez_de_degradar(tmp_path: Path):
+    out, config = _preparar_saida(tmp_path)
+    _escrever_releases_csv(out / "releases.csv", [("v1", "2025-11-01T00:00:00Z", False)])
+    with pytest.raises(FileNotFoundError, match="releases_historico"):
+        run_compare_collection(MagicMock(), config)
+
+
+def test_compare_ignora_repositorio_sem_pares(tmp_path: Path):
+    out, config = _preparar_saida(tmp_path)
+    _escrever_releases_csv(out / "releases_historico.csv", [("v1", "2025-11-01T00:00:00Z", False)])
+    with patch("pipeline.orchestrator.collect_repo_commits_between_releases", return_value=[]) as coleta:
+        results, _path, n404 = run_compare_collection(MagicMock(), config)
+    assert results == [] and n404 == 0
+    coleta.assert_not_called()
