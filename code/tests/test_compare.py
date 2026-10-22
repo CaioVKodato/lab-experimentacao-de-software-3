@@ -263,3 +263,94 @@ def test_write_commits_csv_multiplos_commits(tmp_path: Path):
     path = write_commits_csv(results, tmp_path / "commits.csv")
     lines = path.read_text(encoding="utf-8").strip().split("\n")
     assert len(lines) == 3  # header + 2 commits
+
+
+# ---------------------------------------------------------------------------
+# Mensagem do commit e versão do cache (Issue #20: a heurística do CFR (b) precisa dela)
+# ---------------------------------------------------------------------------
+
+from pipeline.compare import CACHE_VERSAO, MAX_MENSAGEM  # noqa: E402
+
+
+def _raw_commit_msg(sha: str, date: str, message: str) -> dict:
+    return {"sha": sha, "commit": {"author": {"date": date}, "message": message}}
+
+
+def test_extract_commit_preserva_a_mensagem():
+    raw = _raw_commit_msg("abc", "2026-01-15T10:00:00Z", "fix: crash ao abrir arquivo")
+    assert _extract_commit(raw).message == "fix: crash ao abrir arquivo"
+
+
+def test_extract_commit_sem_mensagem_vira_vazia():
+    assert _extract_commit({"sha": "abc", "commit": {}}).message == ""
+    assert _extract_commit({}).message == ""
+
+
+def test_extract_commit_trunca_mensagens_muito_longas():
+    raw = _raw_commit_msg("abc", "2026-01-15T10:00:00Z", "x" * (MAX_MENSAGEM + 500))
+    assert len(_extract_commit(raw).message) == MAX_MENSAGEM
+
+
+def test_mensagem_sobrevive_ao_cache(cache: JsonCache):
+    path = "/repos/o/r/compare/v1.0...v2.0"
+    client = FakeClient({path: [_raw_commit_msg("abc", "2026-01-15T10:00:00Z", "revert: desfaz mudança")]})
+    collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+    segundo = collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+    assert segundo.from_cache is True
+    assert segundo.commits[0].message == "revert: desfaz mudança"
+
+
+def test_cache_novo_grava_a_versao(cache: JsonCache):
+    path = "/repos/o/r/compare/v1.0...v2.0"
+    client = FakeClient({path: [_raw_commit("abc", "2026-01-15T10:00:00Z")]})
+    collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+    assert cache.load(_cache_key("o", "r", "v1.0", "v2.0"))["versao"] == CACHE_VERSAO
+
+
+def test_cache_antigo_sem_versao_e_ignorado_em_vez_de_lido_com_mensagem_vazia(cache: JsonCache):
+    # Formato anterior: os commits só tinham sha e data. Lê-lo "com sucesso" daria
+    # mensagens vazias e a heurística de CFR (b) ficaria degradada sem ninguém notar.
+    key = _cache_key("o", "r", "v1.0", "v2.0")
+    cache.save(key, {"full_name": "o/r", "not_found": False,
+                     "commits": [{"sha": "abc", "author_date": "2026-01-15T10:00:00Z"}]})
+    path = "/repos/o/r/compare/v1.0...v2.0"
+    client = FakeClient({path: [_raw_commit_msg("abc", "2026-01-15T10:00:00Z", "fix: x")]})
+    result = collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+    assert result.from_cache is False and len(client.calls) == 1
+    assert result.commits[0].message == "fix: x"
+    again = collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+    assert again.from_cache is True and len(client.calls) == 1
+
+
+def test_404_antigo_sem_versao_tambem_e_refeito(cache: JsonCache):
+    key = _cache_key("o", "r", "v1.0", "v2.0")
+    cache.save(key, {"full_name": "o/r", "commits": [], "not_found": True})
+    path = "/repos/o/r/compare/v1.0...v2.0"
+    client = FakeClient({path: [_raw_commit("abc", "2026-01-15T10:00:00Z")]})
+    result = collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+    assert result.from_cache is False and result.not_found is False
+
+
+def test_as_api_reproduz_o_formato_cru_consumido_pelas_metricas():
+    entry = CommitEntry(sha="abc", author_date="2026-01-15T10:00:00Z", message="fix: x")
+    assert entry.as_api() == {
+        "sha": "abc",
+        "commit": {"message": "fix: x", "author": {"date": "2026-01-15T10:00:00Z"}},
+    }
+
+
+def test_commits_coletados_alimentam_a_heuristica_e_o_lead_time_do_grupo():
+    from metricas.cfr_releases import tem_keyword_corretiva
+    from metricas.lead_time import data_commit
+
+    com_fix = CommitEntry(sha="a", author_date="2026-05-12T10:00:00Z", message="fix: crash ao abrir arquivo")
+    assert tem_keyword_corretiva([com_fix.as_api()]) is True
+    assert data_commit(com_fix.as_api()).year == 2026
+    # Contraponto: sem a mensagem (o comportamento antigo), o critério nunca dispararia.
+    sem_msg = CommitEntry(sha="a", author_date="2026-05-12T10:00:00Z")
+    assert tem_keyword_corretiva([sem_msg.as_api()]) is False
+
+
+def test_csv_de_commits_continua_sem_a_coluna_de_mensagem(tmp_path: Path):
+    path = write_commits_csv([], tmp_path / "commits.csv")
+    assert path.read_text(encoding="utf-8").strip() == "full_name,base_tag,head_tag,sha,author_date"
