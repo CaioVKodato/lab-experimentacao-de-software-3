@@ -30,8 +30,12 @@ Gerado automaticamente a partir do esquema em `code/pipeline/dataset.py`.
 | `lt_n_commits` | inteiro | contagem | Qualidade | total de commits usados na variante (b) |
 | `n_runs_validas` | inteiro | contagem | RQ03 | workflow runs `push` do default branch com conclusion em sucesso ou falha (ignorados não contam) |
 | `cfr_a` | decimal | proporção 0–1 | RQ03 | falhas ÷ (falhas + sucessos), todos os workflows juntos (proxy de CI) |
-| `cfr_b` | decimal | proporção 0–1 | RQ03 | releases seguidas por release corretiva em ≤ 7 dias ÷ releases avaliadas (heurística; vazio até a heurística ser aplicada) |
-| `cfr_b_n_avaliadas` | inteiro | contagem | Qualidade | releases avaliadas na variante (b), sem as dos últimos 7 dias da janela (censura) |
+| `cfr_b` | decimal | proporção 0–1 | RQ03 | `cfr_b_n_falhas` ÷ `cfr_b_n_avaliadas` (heurística de `metricas/cfr_releases.py`); vazio se não há release avaliável |
+| `cfr_b_n_avaliadas` | inteiro | contagem | Qualidade | releases no denominador: publicadas na janela e fora dos 7 dias finais (censura) |
+| `cfr_b_n_falhas` | inteiro | contagem | Qualidade | releases seguidas de release corretiva em até 7 dias |
+| `cfr_b_n_censuradas` | inteiro | contagem | Qualidade | releases publicadas nos 7 dias finais da janela, excluídas do denominador |
+| `cfr_b_n_sem_compare` | inteiro | contagem | Qualidade | releases seguintes sem `compare` disponível (só o critério SemVer foi aplicado) |
+| `cfr_b_heuristica` | texto | — | Qualidade | versão da heurística de release corretiva (v1 = patch do SemVer OU revert/hotfix/fix nos commits) |
 | `recuperacao_mediana_horas` | decimal | horas | RQ04 | mediana dos episódios concluídos de todos os workflows: `updated_at` do sucesso − `run_started_at` da primeira falha |
 | `recuperacao_n_episodios` | inteiro | contagem | Qualidade | episódios de falha (concluídos + censurados) em todos os workflows |
 | `recuperacao_n_censurados` | inteiro | contagem | Qualidade | episódios sem sucesso posterior dentro da janela |

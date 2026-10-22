@@ -143,10 +143,58 @@ def test_linha_valores_calculados_com_os_exemplos_do_enunciado():
     assert linha["estrelas"] == 5000 and linha["linguagem_principal"] == "Python"
 
 
-def test_cfr_b_fica_vazio_ate_a_heuristica_existir_e_aceita_valor_depois():
-    assert linha_repositorio(**_entrada())["cfr_b"] is None
-    linha = linha_repositorio(**_entrada(), cfr_b=(0.25, 8))
-    assert linha["cfr_b"] == 0.25 and linha["cfr_b_n_avaliadas"] == 8
+def _entrada_cfr_b(releases, commits_por_tag):
+    entrada = _entrada()
+    entrada.update(releases=releases, commits_por_tag=commits_por_tag)
+    return entrada
+
+
+def commit_com_msg(msg):
+    return {"commit": {"message": msg, "author": {"date": c(5, 10)}}}
+
+
+def test_cfr_b_liga_a_heuristica_do_grupo_com_o_exemplo_do_enunciado():
+    # v2.3.0 falhou (v2.3.1 só muda o patch e traz um fix); v2.4.0 não falhou.
+    releases = [rel("v2.3.0", 5, 10), rel("v2.3.1", 5, 12), rel("v2.4.0", 6, 1), rel("v2.5.0", 6, 20)]
+    por_tag = {"v2.3.1": [commit_com_msg("fix: crash ao abrir arquivo")]}
+    linha = linha_repositorio(**_entrada_cfr_b(releases, por_tag))
+    assert linha["cfr_b"] == pytest.approx(0.25)
+    assert linha["cfr_b_n_avaliadas"] == 4
+    assert linha["cfr_b_n_falhas"] == 1
+    assert linha["cfr_b_n_censuradas"] == 0
+    assert linha["cfr_b_n_sem_compare"] == 0
+    assert linha["cfr_b_heuristica"] == "v1"
+
+
+def test_cfr_b_sem_falhas_vale_zero_e_nao_vazio():
+    linha = linha_repositorio(**_entrada())  # releases espaçadas em semanas
+    assert linha["cfr_b"] == 0.0 and linha["cfr_b_n_avaliadas"] == 3
+
+
+def test_cfr_b_conta_releases_censuradas_nos_7_dias_finais_da_janela():
+    releases = [rel("v1.0", 3, 1), rel("v1.1", 12, 28)]
+    linha = linha_repositorio(**_entrada_cfr_b(releases, {}))
+    assert linha["cfr_b_n_censuradas"] == 1
+    assert linha["cfr_b_n_avaliadas"] == 1
+
+
+def test_cfr_b_sem_compare_aplica_so_semver_e_e_contado():
+    releases = [rel("v1.0.0", 3, 1), rel("v1.0.1", 3, 3)]
+    linha = linha_repositorio(**_entrada_cfr_b(releases, {"v1.0.1": None}))
+    assert linha["cfr_b_n_sem_compare"] == 1
+    assert linha["cfr_b_n_falhas"] == 1  # patch mudou, então o critério SemVer basta
+
+
+def test_versao_da_heuristica_e_registrada_no_dataset():
+    linha = linha_repositorio(**_entrada(), versao_heuristica="v2")
+    assert linha["cfr_b_heuristica"] == "v2"
+
+
+def test_cfr_b_vazio_quando_nao_ha_releases():
+    entrada = _entrada()
+    entrada.update(releases=[], commits_por_tag={})
+    linha = linha_repositorio(**entrada)
+    assert linha["cfr_b"] is None and linha["cfr_b_n_avaliadas"] == 0
 
 
 def test_metadado_ausente_vira_vazio_e_nao_quebra():
@@ -169,14 +217,17 @@ def test_repositorio_sem_runs_nem_releases_nao_quebra():
 
 def test_csv_tem_cabecalho_do_esquema_e_celulas_vazias_para_ausentes(tmp_path):
     destino = tmp_path / "saida" / "dataset.csv"
-    escrever_csv([linha_repositorio(**_entrada())], destino)
+    entrada = _entrada()
+    entrada["metadados"] = {}  # repositório sem metadados: as colunas ficam ausentes
+    escrever_csv([linha_repositorio(**entrada)], destino)
     with destino.open(encoding="utf-8", newline="") as fh:
         leitor = csv.DictReader(fh)
         linhas = list(leitor)
         assert leitor.fieldnames == nomes_colunas()
     assert len(linhas) == 1
     assert linhas[0]["repo"] == "dono/proj"
-    assert linhas[0]["cfr_b"] == ""          # ausente = célula vazia
+    assert linhas[0]["estrelas"] == ""       # ausente = célula vazia
+    assert linhas[0]["cfr_b"] == "0.0"       # calculado e zero: NÃO é ausente
     assert float(linhas[0]["cfr_a"]) == pytest.approx(1 / 3)
 
 
