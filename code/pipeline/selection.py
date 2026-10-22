@@ -3,17 +3,34 @@
 Busca via /search/repositories com fatiamento por faixas de estrelas para
 ultrapassar o limite de 1.000 resultados por consulta. Em seguida aplica os
 filtros do enunciado e gera a tabela do funil.
+
+Issue #20 — duas melhorias opcionais, ambas desligadas por padrão:
+
+* COTA POR FAIXA (`sample.stratify: true`). Sem ela, a amostra é formada pelos primeiros
+  aprovados na ordem das faixas, ou seja, concentra-se nas faixas de MENOS estrelas, que
+  também são as de menor taxa de aprovação (medido: ~10% em 1.000–2.000 estrelas contra
+  ~33% em 10.001–25.000). Com ela, o `target_size` é dividido igualmente entre as faixas
+  e cada faixa só é avaliada até fechar a cota. Se alguma faixa não tiver aprovados
+  suficientes, o déficit é preenchido em rodízio pelas sobras das outras. A alocação
+  igual SUPER-REPRESENTA as faixas altas em relação à população do GitHub: é uma escolha
+  metodológica, a ser declarada no artigo. Nesse modo, `max_candidates` (CLI) vale POR
+  FAIXA, e o padrão é `github.max_candidates_per_range` (1.000, o teto da API de busca).
+* RETOMADA POR CACHE (`paths.cache_dir`). Cada avaliação é gravada por repositório,
+  separada por janela e critérios; rodar de novo após uma queda não repete chamadas. Erro
+  de API não é cacheado.
 """
 
 from __future__ import annotations
 
 import csv
 import json
+import sys
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from pipeline.cache import JsonCache
 from pipeline.github_client import GitHubAPIError, GitHubClient
 
 # conclusions que entram nos cálculos (seção 3 do enunciado)
@@ -89,6 +106,7 @@ class SelectionResult:
     sample: list[RepoCandidate]
     funnel: FunnelStats
     evaluated: list[dict[str, Any]] = field(default_factory=list)
+    por_faixa: list[dict[str, Any]] = field(default_factory=list)  # só no modo estratificado
 
 
 def parse_star_ranges(raw: Iterable[Any] | None) -> list[tuple[int | None, int | None]]:
@@ -315,6 +333,200 @@ def _month_slices(start: date, end: date) -> list[tuple[date, date]]:
     return slices
 
 
+def faixa_de(
+    estrelas: int, faixas: list[tuple[int | None, int | None]]
+) -> int | None:
+    """Índice da faixa que contém `estrelas` (limites inclusivos; None = sem limite)."""
+    for i, (minimo, maximo) in enumerate(faixas):
+        if (minimo is None or estrelas >= minimo) and (maximo is None or estrelas <= maximo):
+            return i
+    return None
+
+
+def rotulo_faixa(minimo: int | None, maximo: int | None) -> str:
+    if maximo is None:
+        return f"{minimo}+"
+    if minimo is None:
+        return f"<={maximo}"
+    return f"{minimo}-{maximo}"
+
+
+def quotas_por_faixa(target_size: int, n_faixas: int) -> list[int]:
+    """Divide o alvo igualmente; a sobra vai uma a uma para as primeiras faixas."""
+    if n_faixas <= 0:
+        return []
+    base, resto = divmod(target_size, n_faixas)
+    return [base + (1 if i < resto else 0) for i in range(n_faixas)]
+
+
+def search_candidates_por_faixa(
+    client: GitHubClient,
+    star_ranges: list[tuple[int | None, int | None]],
+    *,
+    extra_query: str = "",
+    max_por_faixa: int | None = None,
+) -> list[list[RepoCandidate]]:
+    """Como `search_candidates`, mas devolve os candidatos AGRUPADOS por faixa.
+
+    Remove duplicatas entre faixas e limita cada faixa a `max_por_faixa`."""
+    vistos: set[str] = set()
+    grupos: list[list[RepoCandidate]] = []
+    per_page = min(client.per_page, 100)
+    for min_s, max_s in star_ranges:
+        grupo: list[RepoCandidate] = []
+        partes = [stars_query(min_s, max_s), "fork:false"]
+        if extra_query:
+            partes.append(extra_query.strip())
+        query = " ".join(partes)
+        page = 1
+        while page <= 10 and (max_por_faixa is None or len(grupo) < max_por_faixa):
+            body = client.get(
+                "/search/repositories",
+                {"q": query, "sort": "stars", "order": "desc", "per_page": per_page, "page": page},
+            )
+            items = body.get("items") or []
+            if not items:
+                break
+            for item in items:
+                repo = repo_from_search_item(item)
+                if repo.full_name in vistos:
+                    continue
+                vistos.add(repo.full_name)
+                grupo.append(repo)
+                if max_por_faixa is not None and len(grupo) >= max_por_faixa:
+                    break
+            if len(items) < per_page:
+                break
+            page += 1
+        grupos.append(grupo)
+    return grupos
+
+
+def _avaliar_com_cache(
+    client: GitHubClient,
+    cache: JsonCache | None,
+    repo: RepoCandidate,
+    *,
+    window_start: date,
+    window_end: date,
+    min_releases: int,
+    min_workflow_runs: int,
+) -> dict[str, Any]:
+    """`evaluate_repo` com cache por repositório, janela e critérios."""
+    def avaliar() -> dict[str, Any]:
+        return evaluate_repo(
+            client, repo, window_start=window_start, window_end=window_end,
+            min_releases=min_releases, min_workflow_runs=min_workflow_runs,
+        )
+
+    if cache is None:
+        return avaliar()
+    periodo = f"{window_start.isoformat()}_{window_end.isoformat()}_r{min_releases}_n{min_workflow_runs}"
+    chave = f"selecao/{periodo}/{repo.owner}__{repo.name}"
+    row = cache.load(chave)
+    if isinstance(row, dict) and row.get("full_name") == repo.full_name:
+        row["stargazers_count"] = repo.stargazers_count  # as estrelas mudam; o resto vale
+        return row
+    row = avaliar()
+    if not str(row.get("discard_reason") or "").startswith("api_error"):
+        cache.save(chave, row)  # erro de API é transitório: não grava
+    return row
+
+
+def _contabilizar(row: dict[str, Any], funnel: FunnelStats) -> bool:
+    """Atualiza o funil com uma avaliação; devolve True se o repositório foi incluído."""
+    reason = str(row["discard_reason"] or "")
+    if not row["has_actions"]:
+        if reason == "no_actions":
+            funnel.discarded_no_actions += 1
+        elif reason.startswith("api_error"):
+            funnel.discarded_api_error += 1
+        return False
+    funnel.with_actions += 1
+    if reason == "few_releases":
+        funnel.discarded_few_releases += 1
+        return False
+    if reason == "few_runs":
+        funnel.discarded_few_runs += 1
+        return False
+    if reason.startswith("api_error"):
+        funnel.discarded_api_error += 1
+        return False
+    if row["included"]:
+        funnel.with_min_criteria += 1
+        return True
+    return False
+
+
+def _selecionar_estratificado(
+    client: GitHubClient,
+    cache: JsonCache | None,
+    *,
+    faixas: list[tuple[int | None, int | None]],
+    target_size: int,
+    max_por_faixa: int,
+    extra_query: str,
+    window_start: date,
+    window_end: date,
+    min_releases: int,
+    min_workflow_runs: int,
+) -> SelectionResult:
+    n = len(faixas)
+    rotulos = [rotulo_faixa(a, b) for a, b in faixas]
+    quotas = quotas_por_faixa(target_size, n)
+    grupos = search_candidates_por_faixa(
+        client, faixas, extra_query=extra_query, max_por_faixa=max_por_faixa
+    )
+
+    funnel = FunnelStats(candidates=sum(len(g) for g in grupos))
+    sample: list[RepoCandidate] = []
+    evaluated: list[dict[str, Any]] = []
+    avaliados = [0] * n
+    aprovados = [0] * n
+    sobras: list[list[RepoCandidate]] = [[] for _ in range(n)]
+
+    def avaliar(i: int, repo: RepoCandidate) -> None:
+        row = _avaliar_com_cache(
+            client, cache, repo, window_start=window_start, window_end=window_end,
+            min_releases=min_releases, min_workflow_runs=min_workflow_runs,
+        )
+        row["faixa"] = rotulos[i]
+        evaluated.append(row)
+        avaliados[i] += 1
+        if _contabilizar(row, funnel):
+            sample.append(repo)
+            aprovados[i] += 1
+        if len(evaluated) % 25 == 0:
+            print(f"[selecao] {len(evaluated)} avaliados, {len(sample)} aprovados", file=sys.stderr, flush=True)
+
+    # Passada 1: cada faixa até fechar a cota.
+    for i, grupo in enumerate(grupos):
+        for pos, repo in enumerate(grupo):
+            if aprovados[i] >= quotas[i]:
+                sobras[i] = grupo[pos:]
+                break
+            avaliar(i, repo)
+        print(f"[selecao] faixa {rotulos[i]}: {aprovados[i]}/{quotas[i]} aprovados, {avaliados[i]} avaliados",
+              file=sys.stderr, flush=True)
+
+    # Passada 2: déficit das faixas que não fecharam a cota, em rodízio pelas sobras.
+    while len(sample) < target_size and any(sobras):
+        for i in range(n):
+            if len(sample) >= target_size:
+                break
+            if sobras[i]:
+                avaliar(i, sobras[i].pop(0))
+
+    funnel.sample = len(sample)
+    funnel.build_stages()
+    por_faixa = [
+        {"faixa": rotulos[i], "cota": quotas[i], "candidatos": len(grupos[i]),
+         "avaliados": avaliados[i], "aprovados": aprovados[i]}
+        for i in range(n)
+    ]
+    return SelectionResult(sample=sample, funnel=funnel, evaluated=evaluated, por_faixa=por_faixa)
+
+
 def evaluate_repo(
     client: GitHubClient,
     repo: RepoCandidate,
@@ -394,6 +606,25 @@ def run_selection(
     min_runs = int(sample_cfg.get("min_workflow_runs") or 50)
     star_ranges = parse_star_ranges(github_cfg.get("star_ranges"))
     extra_query = str(github_cfg.get("search_extra_query") or "")
+    cache_dir = (config.get("paths") or {}).get("cache_dir")
+    cache = JsonCache(Path(cache_dir)) if cache_dir else None
+
+    if sample_cfg.get("stratify"):
+        return _selecionar_estratificado(
+            client,
+            cache,
+            faixas=star_ranges,
+            target_size=target_size,
+            max_por_faixa=max_candidates
+            if max_candidates is not None
+            else int(github_cfg.get("max_candidates_per_range") or 1000),
+            extra_query=extra_query,
+            window_start=window_start,
+            window_end=window_end,
+            min_releases=min_releases,
+            min_workflow_runs=min_runs,
+        )
+
     search_cap = max_candidates
     if search_cap is None and github_cfg.get("max_search_candidates") is not None:
         search_cap = int(github_cfg["max_search_candidates"])
@@ -412,8 +643,9 @@ def run_selection(
     for repo in candidates:
         if len(sample) >= target_size:
             break
-        row = evaluate_repo(
+        row = _avaliar_com_cache(
             client,
+            cache,
             repo,
             window_start=window_start,
             window_end=window_end,
@@ -497,6 +729,16 @@ def write_selection_outputs(
             writer.writeheader()
             writer.writerows(result.evaluated)
         paths["evaluated_csv"] = evaluated_csv
+
+    if result.por_faixa:
+        por_faixa_csv = output_dir / "funnel_por_faixa.csv"
+        with por_faixa_csv.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(
+                fh, fieldnames=["faixa", "cota", "candidatos", "avaliados", "aprovados"]
+            )
+            writer.writeheader()
+            writer.writerows(result.por_faixa)
+        paths["funnel_por_faixa_csv"] = por_faixa_csv
 
     return paths
 
