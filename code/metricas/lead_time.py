@@ -84,6 +84,21 @@ def selecionar_pares(
     return pares
 
 
+def pares_para_coleta(releases: Sequence[Release], janela: Janela) -> list[tuple[str, str]]:
+    """Pares (tag base, tag final) a pedir ao `compare`, para as DUAS variantes.
+
+    Une os pares da definição principal e os da variante com pré-releases, sem repetir,
+    em ordem cronológica da release final. A coleta deve buscar todos eles: pedir só os da
+    definição principal deixaria a variante com pré-releases sem dados. Como a release
+    anterior pode estar fora da janela, `releases` deve trazer o histórico completo.
+    """
+    vistos: dict[tuple[str, str], datetime] = {}
+    for incluir in (False, True):
+        for base, head in selecionar_pares(releases, janela, incluir_prerelease=incluir):
+            vistos.setdefault((str(base["tag_name"]), str(head["tag_name"])), data_release(head))
+    return [par for par, _ in sorted(vistos.items(), key=lambda kv: kv[1])]
+
+
 # ------------------------------------------------------ agregação por repositório
 
 @dataclass(frozen=True)
