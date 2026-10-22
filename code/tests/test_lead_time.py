@@ -188,3 +188,27 @@ def test_parse_janela_dia_final_e_inclusivo():
     assert j.contem(datetime(2026, 9, 30, 23, 59, tzinfo=timezone.utc))
     assert not j.contem(datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc))
     assert not j.contem(datetime(2025, 9, 30, 23, 59, tzinfo=timezone.utc))
+
+# ---------- pares a coletar nas duas variantes (Issue #20) ----------
+
+from metricas.lead_time import pares_para_coleta  # noqa: E402
+
+
+def test_pares_para_coleta_junta_as_duas_variantes_sem_repetir():
+    todas = [rel("v1.0", 2, 1), rel("v1.1-rc1", 3, 1, prerelease=True), rel("v1.1", 4, 1)]
+    assert pares_para_coleta(todas, JANELA) == [("v1.0", "v1.1-rc1"), ("v1.0", "v1.1"), ("v1.1-rc1", "v1.1")]
+
+
+def test_pares_para_coleta_sem_prerelease_nao_duplica():
+    todas = [rel("v1.0", 2, 1), rel("v1.1", 3, 15), rel("v1.2", 4, 10)]
+    assert pares_para_coleta(todas, JANELA) == [("v1.0", "v1.1"), ("v1.1", "v1.2")]
+
+
+def test_pares_para_coleta_usa_como_base_a_release_anterior_a_janela():
+    todas = [rel("v0.9", 12, 20, ano=2025), rel("v1.0", 1, 10)]
+    assert pares_para_coleta(todas, JANELA) == [("v0.9", "v1.0")]
+
+
+def test_pares_para_coleta_sem_releases_na_janela_devolve_vazio():
+    assert pares_para_coleta([rel("v0.9", 12, 20, ano=2025)], JANELA) == []
+    assert pares_para_coleta([], JANELA) == []
