@@ -8,6 +8,7 @@ de consulta ao /rate_limit.
 from __future__ import annotations
 
 import re
+import sys
 import time
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
@@ -19,6 +20,15 @@ from pipeline.cache import JsonCache
 DEFAULT_API_BASE = "https://api.github.com"
 _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 _MAX_BACKOFF = 120.0
+
+# Falhas em que NÃO houve resposta do servidor (a conexão caiu, expirou ou veio cortada).
+# São transitórias e, numa coleta de horas, precisam ser repetidas em vez de derrubar o
+# processo. Erros de programação (URL inválida etc.) ficam de fora de propósito.
+_ERROS_DE_REDE = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
 
 
 class GitHubAPIError(RuntimeError):
@@ -60,6 +70,7 @@ class GitHubClient:
         cache: JsonCache | None = None,
         max_retries: int = 5,
         backoff_base: float = 1.0,
+        max_network_retries: int = 10,
     ) -> None:
         if not token:
             raise ValueError("token do GitHub é obrigatório")
@@ -69,6 +80,8 @@ class GitHubClient:
         self._cache = cache
         self._max_retries = max_retries
         self._backoff_base = backoff_base
+        # Com base 1 s e teto de 120 s, 10 tentativas toleram ~8 min de rede fora do ar.
+        self._max_network_retries = max_network_retries
         self._rate_limit_remaining: int | None = None
         self._rate_limit_reset: int | None = None
         self.session = session or requests.Session()
@@ -113,8 +126,23 @@ class GitHubClient:
                 return cached["body"], cached["headers"]
 
         attempt = 0
+        net_attempt = 0
         while True:
-            response = self.session.get(url, params=query, timeout=60)
+            try:
+                response = self.session.get(url, params=query, timeout=60)
+            except _ERROS_DE_REDE as exc:
+                if net_attempt >= self._max_network_retries:
+                    raise
+                delay = min(self._backoff_base * (2 ** net_attempt), _MAX_BACKOFF)
+                net_attempt += 1
+                print(
+                    f"[cliente] falha de rede ({type(exc).__name__}); tentativa "
+                    f"{net_attempt}/{self._max_network_retries} em {delay:.0f}s",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                self._sleep(delay)
+                continue
             self._update_rate_limit(response)
 
             if response.status_code == 403 and _should_wait_rate_limit(response):

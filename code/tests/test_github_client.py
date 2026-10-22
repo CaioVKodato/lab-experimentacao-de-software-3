@@ -366,3 +366,79 @@ def test_should_wait_rate_limit_corpo_menciona_rate_limit():
 def test_should_wait_rate_limit_outro_403():
     resp = _fake_response(403, headers={"X-RateLimit-Remaining": "50"}, text="Forbidden")
     assert _should_wait_rate_limit(resp) is False
+
+
+# ---------------------------------------------------------------------------
+# Queda de rede (Issue #20): a conexão cai sem resposta, e o processo não pode morrer
+# ---------------------------------------------------------------------------
+
+import requests  # noqa: E402
+
+
+def _conexao_caiu() -> requests.exceptions.ConnectionError:
+    return requests.exceptions.ConnectionError("Connection aborted.", ConnectionResetError(10054))
+
+
+def _make_client_rede(responses: list, *, max_network_retries: int = 10, backoff_base: float = 0.0):
+    sleeps: list[float] = []
+    session = MagicMock()
+    session.headers = {}
+    session.get.side_effect = responses
+    client = GitHubClient(
+        "fake-token", session=session, sleep_fn=lambda t: sleeps.append(t),
+        max_retries=1, backoff_base=backoff_base, max_network_retries=max_network_retries,
+    )
+    return client, session, sleeps
+
+
+def test_queda_de_rede_e_repetida_ate_funcionar():
+    client, session, sleeps = _make_client_rede([_conexao_caiu(), _conexao_caiu(), _fake_response(200, {"ok": 1})])
+    body, _ = client.get_json("/x")
+    assert body == {"ok": 1}
+    assert session.get.call_count == 3 and len(sleeps) == 2
+
+
+def test_timeout_tambem_e_repetido():
+    client, session, _ = _make_client_rede([requests.exceptions.ReadTimeout("lento"), _fake_response(200, {"ok": 1})])
+    assert client.get_json("/x")[0] == {"ok": 1}
+    assert session.get.call_count == 2
+
+
+def test_resposta_cortada_no_meio_tambem_e_repetida():
+    client, _, _ = _make_client_rede([requests.exceptions.ChunkedEncodingError("cortou"), _fake_response(200, {"ok": 1})])
+    assert client.get_json("/x")[0] == {"ok": 1}
+
+
+def test_espera_de_rede_cresce_em_dobro_e_tem_teto():
+    falhas = [_conexao_caiu() for _ in range(9)]
+    client, _, sleeps = _make_client_rede(falhas + [_fake_response(200, {"ok": 1})], backoff_base=1.0)
+    client.get_json("/x")
+    assert sleeps == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 120.0, 120.0]  # teto de 120 s
+
+
+def test_desiste_depois_do_limite_e_repassa_o_erro_original():
+    client, session, _ = _make_client_rede([_conexao_caiu() for _ in range(3)], max_network_retries=2)
+    with pytest.raises(requests.exceptions.ConnectionError):
+        client.get_json("/x")
+    assert session.get.call_count == 3  # a original + 2 repetições
+
+
+def test_contadores_de_rede_e_de_5xx_sao_independentes():
+    respostas = [_conexao_caiu(), _fake_response(500, None, text="erro"), _conexao_caiu(), _fake_response(200, {"ok": 1})]
+    client, _, _ = _make_client_rede(respostas, max_network_retries=2)  # 5xx: só 1 repetição
+    assert client.get_json("/x")[0] == {"ok": 1}
+
+
+def test_erro_que_nao_e_de_rede_nao_e_repetido():
+    client, session, _ = _make_client_rede([requests.exceptions.InvalidURL("url ruim")])
+    with pytest.raises(requests.exceptions.InvalidURL):
+        client.get_json("/x")
+    assert session.get.call_count == 1
+
+
+def test_paginacao_sobrevive_a_uma_queda_no_meio():
+    pagina1 = _fake_response(200, [1, 2], headers={"Link": '<https://api.github.com/x?page=2>; rel="next"'})
+    pagina2 = _fake_response(200, [3])
+    client, session, sleeps = _make_client_rede([pagina1, _conexao_caiu(), pagina2])
+    assert client.paginate("/x") == [1, 2, 3]
+    assert len(sleeps) == 1 and session.get.call_count == 3
