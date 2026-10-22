@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from metricas.janela import parse_janela
+from metricas.lead_time import pares_para_coleta
 from pipeline.cache import JsonCache
 from pipeline.compare import (
     CompareResult,
@@ -93,7 +94,8 @@ def _full_name(row: dict[str, str]) -> str:
 
 
 def _release_pairs(releases: list[Release]) -> list[tuple[str, str]]:
-    """Pares (anterior, atual) só com releases não pré-release, por data."""
+    """LEGADO: pares só da definição principal e só com as releases dadas. A coleta de
+    `compare` agora usa `pares_para_coleta` (histórico completo, duas variantes)."""
     ordered = sorted(
         (r for r in releases if not r.prerelease),
         key=lambda r: (r.published_at, r.tag_name),
@@ -104,6 +106,25 @@ def _release_pairs(releases: list[Release]) -> list[tuple[str, str]]:
     return pairs
 
 
+def _ler_historico(historico_csv: Path) -> dict[str, list[dict[str, Any]]]:
+    """releases_historico.csv -> {full_name: releases no formato cru da API}.
+
+    O histórico traz TODAS as épocas (inclusive antes da janela), que é o que permite
+    achar a release anterior da primeira release da janela (Issue #20)."""
+    por_repo: dict[str, list[dict[str, Any]]] = {}
+    with historico_csv.open(encoding="utf-8", newline="") as fh:
+        for row in csv.DictReader(fh):
+            por_repo.setdefault(row["full_name"], []).append(
+                {
+                    "tag_name": row["tag_name"],
+                    "published_at": row["published_at"],
+                    "draft": False,
+                    "prerelease": str(row.get("prerelease", "")).lower() in {"1", "true"},
+                }
+            )
+    return por_repo
+
+
 def run_compare_collection(
     client: _Cliente,
     config: dict[str, Any],
@@ -111,38 +132,32 @@ def run_compare_collection(
     sample_csv: Path | None = None,
     force: bool = False,
 ) -> tuple[list[CompareResult], Path, int]:
-    """Compara releases consecutivas da amostra e grava commits CSV."""
+    """Compara releases consecutivas da amostra e grava commits CSV.
+
+    Os pares vêm do HISTÓRICO completo de releases e cobrem as DUAS variantes (definição
+    principal e com pré-releases), via `pares_para_coleta`. Antes, só as releases da janela
+    entravam, então a primeira release da janela ficava sem par e a variante com
+    pré-releases não tinha nenhum `compare` coletado."""
     output_dir = _output_dir(config)
     cache = JsonCache(_cache_dir(config))
     sample_path = sample_csv or (output_dir / "sample_repos.csv")
-    releases_path = output_dir / "releases.csv"
+    historico_path = output_dir / "releases_historico.csv"
+    window = config.get("observation_window") or {}
+    janela = parse_janela(str(window["start"]), str(window["end"]))
 
     sample_rows = _load_sample_rows(sample_path)
-    if not releases_path.is_file():
+    if not historico_path.is_file():
         raise FileNotFoundError(
-            f"Releases não encontradas: {releases_path}. Rode a etapa releases antes."
+            f"Histórico de releases não encontrado: {historico_path}. Rode a etapa releases "
+            "antes (versão que grava releases_historico.csv, Issue #20)."
         )
-
-    by_repo: dict[str, list[Release]] = {}
-    with releases_path.open(encoding="utf-8", newline="") as fh:
-        for row in csv.DictReader(fh):
-            full = row["full_name"]
-            by_repo.setdefault(full, []).append(
-                Release(
-                    full_name=full,
-                    tag_name=row["tag_name"],
-                    name=row.get("name") or None,
-                    published_at=row["published_at"],
-                    prerelease=str(row.get("prerelease", "")).lower() in {"1", "true"},
-                    html_url=row.get("html_url") or "",
-                )
-            )
+    by_repo = _ler_historico(historico_path)
 
     all_results: list[CompareResult] = []
     for row in sample_rows:
         full = _full_name(row)
         owner, name = full.split("/", 1)
-        pairs = _release_pairs(by_repo.get(full, []))
+        pairs = pares_para_coleta(by_repo.get(full, []), janela)
         if not pairs:
             continue
         all_results.extend(
