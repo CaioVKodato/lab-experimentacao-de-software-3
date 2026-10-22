@@ -7,8 +7,11 @@ observation_window:
   end: "2026-09-30"
 
 sample:
-  # Meta Lab03S01: 100 repositórios após os filtros
-  target_size: 100
+  # Meta Lab03S02: no mínimo 300 repositórios após os filtros
+  target_size: 300
+  # Cota igual por faixa de estrelas (veja pipeline/selection.py). Sem isso, a amostra
+  # se concentra nas faixas de menos estrelas, que são as primeiras da lista.
+  stratify: true
   # Critérios mínimos de inclusão (seção 3 do enunciado)
   min_releases: 5
   min_workflow_runs: 50
@@ -28,8 +31,11 @@ github:
     - { min: 100001, max: null }
   # Qualquer cláusula extra na query de busca (opcional)
   search_extra_query: ""
-  # Para ao atingir este nº de candidatos na busca (economiza cota)
+  # Para ao atingir este nº de candidatos na busca (economiza cota).
+  # Ignorado quando sample.stratify é true: nesse caso vale o limite por faixa abaixo.
   max_search_candidates: 500
+  # Candidatos buscados por faixa no modo estratificado (1000 = teto da API de busca)
+  max_candidates_per_range: 1000
 
 paths:
   cache_dir: "data/cache"

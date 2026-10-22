@@ -16,7 +16,8 @@ def test_load_config_yaml():
     config = load_config(ROOT / "config.yaml")
     assert "observation_window" in config
     assert "sample" in config
-    assert config["sample"]["target_size"] == 100
+    assert config["sample"]["target_size"] == 300
+    assert config["sample"]["stratify"] is True
     assert config["sample"]["min_releases"] == 5
     assert config["sample"]["min_workflow_runs"] == 50
     assert "star_ranges" in config["github"]
