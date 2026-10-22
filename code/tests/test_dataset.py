@@ -272,3 +272,64 @@ def test_meses_sem_runs_usa_created_at_das_runs_reais():
     reais = [{"created_at": "2026-01-10T09:00:00Z", "run_started_at": "2026-01-10T09:00:05Z"},
              {"created_at": "2026-02-10T09:00:00Z", "run_started_at": "2026-02-10T09:00:05Z"}]
     assert meses_sem_runs(reais, j) == 1  # março
+
+
+# ---------- variante com pré-releases (insumo da RQ07) ----------
+
+COLUNAS_PRE = {
+    "n_releases_janela_pre", "deploys_por_semana_pre", "lead_time_a_horas_pre", "lead_time_b_horas_pre",
+    "lt_n_releases_avaliadas_pre", "lt_n_ignoradas_compare_pre", "cfr_b_pre", "cfr_b_n_avaliadas_pre",
+}
+
+
+def _entrada_com_prerelease():
+    releases = [rel("v1.0", 2, 1), rel("v1.1-rc1", 3, 1, prerelease=True), rel("v1.1", 4, 1)]
+    # Variante padrão: compare(v1.0...v1.1). Com pré-releases a base de v1.1 passa a ser o rc1.
+    padrao = {"v1.1": commits(c(3, 10))}
+    com_pre = {"v1.1-rc1": commits(c(2, 20)), "v1.1": commits(c(3, 25))}
+    entrada = _entrada()
+    entrada.update(releases=releases, commits_por_tag=padrao, commits_por_tag_pre=com_pre)
+    return entrada
+
+
+def test_esquema_tem_as_colunas_da_variante_com_prerelease():
+    assert COLUNAS_PRE <= set(nomes_colunas())
+
+
+def test_variante_padrao_ignora_prerelease_e_a_variante_pre_a_inclui():
+    linha = linha_repositorio(**_entrada_com_prerelease())
+    assert linha["n_releases_janela"] == 2 and linha["n_releases_janela_pre"] == 3
+    assert linha["deploys_por_semana_pre"] > linha["deploys_por_semana"]
+    assert linha["deploys_por_semana_pre"] == pytest.approx(3 * 7 / 365)
+
+
+def test_lead_time_pre_usa_a_base_correta_de_cada_variante():
+    linha = linha_repositorio(**_entrada_com_prerelease())
+    assert linha["lead_time_a_horas"] == pytest.approx(22 * DIA)       # v1.0 -> v1.1, commit de 10/03
+    assert linha["lead_time_a_horas_pre"] == pytest.approx(8 * DIA)    # mediana de 9d (rc1) e 7d (v1.1)
+    assert linha["lead_time_b_horas_pre"] == pytest.approx(8 * DIA)
+    assert linha["lt_n_releases_avaliadas_pre"] == 2 and linha["lt_n_ignoradas_compare_pre"] == 0
+
+
+def test_cfr_b_pre_tem_denominador_proprio():
+    linha = linha_repositorio(**_entrada_com_prerelease())
+    assert linha["cfr_b_n_avaliadas"] == 2 and linha["cfr_b_n_avaliadas_pre"] == 3
+    assert linha["cfr_b_pre"] == 0.0
+
+
+def test_sem_prerelease_na_amostra_as_duas_variantes_coincidem():
+    entrada = _entrada()
+    entrada["commits_por_tag_pre"] = entrada["commits_por_tag"]
+    linha = linha_repositorio(**entrada)
+    assert linha["lead_time_a_horas_pre"] == linha["lead_time_a_horas"]
+    assert linha["lead_time_b_horas_pre"] == linha["lead_time_b_horas"]
+    assert linha["cfr_b_pre"] == linha["cfr_b"]
+    assert linha["deploys_por_semana_pre"] == linha["deploys_por_semana"]
+
+
+def test_sem_mapa_da_variante_pre_so_as_colunas_de_releases_sao_calculadas():
+    linha = linha_repositorio(**_entrada_com_prerelease() | {"commits_por_tag_pre": None})
+    assert linha["n_releases_janela_pre"] == 3 and linha["deploys_por_semana_pre"] is not None
+    for nome in ("lead_time_a_horas_pre", "lead_time_b_horas_pre", "lt_n_releases_avaliadas_pre",
+                 "lt_n_ignoradas_compare_pre", "cfr_b_pre", "cfr_b_n_avaliadas_pre"):
+        assert linha[nome] is None, nome

@@ -63,6 +63,15 @@ COLUNAS: tuple[Coluna, ...] = (
     Coluna("cfr_b_n_censuradas", "inteiro", "contagem", "releases publicadas nos 7 dias finais da janela, excluídas do denominador", "Qualidade"),
     Coluna("cfr_b_n_sem_compare", "inteiro", "contagem", "releases seguintes sem `compare` disponível (só o critério SemVer foi aplicado)", "Qualidade"),
     Coluna("cfr_b_heuristica", "texto", "—", "versão da heurística de release corretiva (v1 = patch do SemVer OU revert/hotfix/fix nos commits)", "Qualidade"),
+    # --- variante com pré-releases como unidade de deploy (insumo da RQ 07) ---
+    Coluna("n_releases_janela_pre", "inteiro", "contagem", "como `n_releases_janela`, mas incluindo pré-releases (`prerelease=true`)", "RQ07"),
+    Coluna("deploys_por_semana_pre", "decimal", "releases/semana", "`n_releases_janela_pre` ÷ semanas da janela", "RQ07"),
+    Coluna("lead_time_a_horas_pre", "decimal", "horas", "lead time (a) com pré-releases como deploy; a release anterior passa a ser a anterior em qualquer tipo", "RQ07"),
+    Coluna("lead_time_b_horas_pre", "decimal", "horas", "lead time (b) com pré-releases como deploy", "RQ07"),
+    Coluna("lt_n_releases_avaliadas_pre", "inteiro", "contagem", "releases com ≥ 1 commit no `compare`, usadas na variante com pré-releases", "Qualidade"),
+    Coluna("lt_n_ignoradas_compare_pre", "inteiro", "contagem", "releases da variante com pré-releases cujo `compare` falhou ou não foi coletado", "Qualidade"),
+    Coluna("cfr_b_pre", "decimal", "proporção 0–1", "CFR (b) com pré-releases como deploy (mesma heurística, conjunto de releases ampliado)", "RQ07"),
+    Coluna("cfr_b_n_avaliadas_pre", "inteiro", "contagem", "releases no denominador do CFR (b) com pré-releases (fora dos 7 dias finais)", "Qualidade"),
     # --- RQ 04: tempo de recuperação ---
     Coluna("recuperacao_mediana_horas", "decimal", "horas", "mediana dos episódios concluídos de todos os workflows: `updated_at` do sucesso − `run_started_at` da primeira falha", "RQ04"),
     Coluna("recuperacao_n_episodios", "inteiro", "contagem", "episódios de falha (concluídos + censurados) em todos os workflows", "Qualidade"),
@@ -129,6 +138,7 @@ def linha_repositorio(
     janela: Janela,
     coletado_em: str,
     versao_heuristica: str = "v1",
+    commits_por_tag_pre: Optional[Mapping[str, Optional[Sequence[Mapping[str, Any]]]]] = None,
 ) -> dict[str, Any]:
     """Uma linha do dataset, pronta para `escrever_csv`.
 
@@ -136,11 +146,21 @@ def linha_repositorio(
     (as que faltarem viram células vazias). O CFR (b) usa a heurística do grupo
     (`metricas/cfr_releases.py`); `versao_heuristica` fica registrada na linha, para que
     refinamentos feitos depois da validação contra a amostra-ouro sejam rastreáveis.
+
+    `commits_por_tag_pre` é o mapa de commits da variante com pré-releases. Ele é SEPARADO
+    de `commits_por_tag` porque, com pré-releases, a release anterior de uma mesma tag pode
+    mudar e, com ela, o `compare` necessário (use `pares_para_coleta` para saber quais
+    pedir). Sem ele, só as colunas que dependem apenas da lista de releases são calculadas.
     """
     lt = lead_time_repositorio(releases, commits_por_tag, janela)
     rec = tempo_recuperacao_repositorio(runs)
     cfr = change_failure_rate_releases(releases, commits_por_tag, janela)
     n_rel = len(releases_na_janela(releases, janela))
+    n_rel_pre = len(releases_na_janela(releases, janela, incluir_prerelease=True))
+    lt_pre = cfr_pre = None
+    if commits_por_tag_pre is not None:
+        lt_pre = lead_time_repositorio(releases, commits_por_tag_pre, janela, incluir_prerelease=True)
+        cfr_pre = change_failure_rate_releases(releases, commits_por_tag_pre, janela, incluir_prerelease=True)
 
     return {
         "repo": repo,
@@ -165,6 +185,14 @@ def linha_repositorio(
         "cfr_b_n_censuradas": cfr.n_releases_censuradas,
         "cfr_b_n_sem_compare": cfr.n_sem_compare,
         "cfr_b_heuristica": versao_heuristica,
+        "n_releases_janela_pre": n_rel_pre,
+        "deploys_por_semana_pre": deploys_por_semana(n_rel_pre, janela),
+        "lead_time_a_horas_pre": lt_pre.mediana_a_horas if lt_pre else None,
+        "lead_time_b_horas_pre": lt_pre.mediana_b_horas if lt_pre else None,
+        "lt_n_releases_avaliadas_pre": lt_pre.n_releases_avaliadas if lt_pre else None,
+        "lt_n_ignoradas_compare_pre": lt_pre.n_ignoradas_compare if lt_pre else None,
+        "cfr_b_pre": cfr_pre.cfr_b if cfr_pre else None,
+        "cfr_b_n_avaliadas_pre": cfr_pre.n_releases_denominador if cfr_pre else None,
         "recuperacao_mediana_horas": rec.mediana_horas,
         "recuperacao_n_episodios": rec.n_episodios,
         "recuperacao_n_censurados": rec.n_censurados,

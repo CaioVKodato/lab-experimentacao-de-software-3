@@ -36,6 +36,14 @@ Gerado automaticamente a partir do esquema em `code/pipeline/dataset.py`.
 | `cfr_b_n_censuradas` | inteiro | contagem | Qualidade | releases publicadas nos 7 dias finais da janela, excluídas do denominador |
 | `cfr_b_n_sem_compare` | inteiro | contagem | Qualidade | releases seguintes sem `compare` disponível (só o critério SemVer foi aplicado) |
 | `cfr_b_heuristica` | texto | — | Qualidade | versão da heurística de release corretiva (v1 = patch do SemVer OU revert/hotfix/fix nos commits) |
+| `n_releases_janela_pre` | inteiro | contagem | RQ07 | como `n_releases_janela`, mas incluindo pré-releases (`prerelease=true`) |
+| `deploys_por_semana_pre` | decimal | releases/semana | RQ07 | `n_releases_janela_pre` ÷ semanas da janela |
+| `lead_time_a_horas_pre` | decimal | horas | RQ07 | lead time (a) com pré-releases como deploy; a release anterior passa a ser a anterior em qualquer tipo |
+| `lead_time_b_horas_pre` | decimal | horas | RQ07 | lead time (b) com pré-releases como deploy |
+| `lt_n_releases_avaliadas_pre` | inteiro | contagem | Qualidade | releases com ≥ 1 commit no `compare`, usadas na variante com pré-releases |
+| `lt_n_ignoradas_compare_pre` | inteiro | contagem | Qualidade | releases da variante com pré-releases cujo `compare` falhou ou não foi coletado |
+| `cfr_b_pre` | decimal | proporção 0–1 | RQ07 | CFR (b) com pré-releases como deploy (mesma heurística, conjunto de releases ampliado) |
+| `cfr_b_n_avaliadas_pre` | inteiro | contagem | Qualidade | releases no denominador do CFR (b) com pré-releases (fora dos 7 dias finais) |
 | `recuperacao_mediana_horas` | decimal | horas | RQ04 | mediana dos episódios concluídos de todos os workflows: `updated_at` do sucesso − `run_started_at` da primeira falha |
 | `recuperacao_n_episodios` | inteiro | contagem | Qualidade | episódios de falha (concluídos + censurados) em todos os workflows |
 | `recuperacao_n_censurados` | inteiro | contagem | Qualidade | episódios sem sucesso posterior dentro da janela |
