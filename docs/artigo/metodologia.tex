@@ -1,0 +1,61 @@
+% Fragmento da Metodologia para o template SBC (Overleaf).
+% Issue #30 — colar após a Introdução. Atualize a tabela do funil com funnel.csv.
+
+\section{Metodologia}
+
+\subsection{Fonte de dados e janela de observação}
+
+A unidade de análise é o repositório público no GitHub com GitHub Actions.
+Os dados vêm da API REST pública, com cache local, \textit{rate limit} e
+\textit{backoff} exponencial; o token permanece apenas em variável de ambiente.
+
+A janela de observação é de 12 meses (UTC), configurada em \texttt{config.yaml}.
+Nesta sprint: 2025-10-01 a 2026-09-30. Contagens e métricas temporais consideram
+eventos com \textit{timestamp} na janela, salvo âncoras permitidas pelo enunciado
+(ex.: release anterior fora da janela no \textit{compare}).
+
+\subsection{Funil de seleção}
+
+A busca é fatiada por faixas de estrelas (teto de 1.000 resultados por consulta).
+Critérios de inclusão: repositório não arquivado; $\geq 5$ releases publicadas
+(\texttt{draft=false}, \texttt{prerelease=false}) na janela; $\geq 50$
+\textit{workflow runs} \texttt{push} no \textit{default branch} na janela.
+Meta Lab03S02: $\geq 300$ repositórios. Com estratificação por faixa
+(\texttt{sample.stratify}), o tamanho-alvo é dividido em cotas iguais ---
+escolha que super-representa faixas altas e deve constar no artigo.
+A tabela quantitativa do funil é gerada em \texttt{funnel.csv}.
+
+\subsection{Definições operacionais e variantes}
+
+\begin{itemize}
+  \item \textbf{Frequência de deploy:} releases na janela $/$ semanas da janela;
+    variantes com pré-releases e \textit{tags} (RQ\,07).
+  \item \textbf{Lead time:} (a) mediana por release do commit mais antigo do
+    \textit{compare}; (b) mediana sobre todos os commits.
+  \item \textbf{CFR:} (a) falhas de CI; (b) releases seguidas em $\leq 7$ dias
+    por release corretiva (patch SemVer ou \texttt{revert}/\texttt{hotfix}/\texttt{fix});
+    releases nos 7 dias finais são censuradas.
+  \item \textbf{Recuperação:} mediana dos episódios concluídos no mesmo
+    \textit{workflow}; episódios sem sucesso são censurados; repos sem episódio
+    ficam com valor ausente.
+\end{itemize}
+
+Tempos em horas; proporções em $[0,1]$. A classificação DORA usa os cortes da
+disciplina; a nota geral é a mediana das quatro notas com arredondamento para
+baixo. A referência \textbf{C1} combina release, lead time (a), CFR (a) e
+recuperação.
+
+\subsection{Protocolo de validação manual}
+
+Amostra-ouro: 60 repositórios e 5 releases cada, sementes fixas
+(\texttt{random\_state\_repos=42}; releases $42+$índice). Três avaliadores
+rotulam independentemente tipo de projeto, entrega real e se cada release é
+corretiva, \textbf{sem} ver a heurística. Concordância: kappa de Fleiss
+interpretado por Landis \& Koch. Consenso: maioria simples; empates 1-1-1 em
+reunião. Sobre o consenso, precisão/\textit{recall}/F1 da heurística (e
+possível refinamento).
+
+\subsection{Ameaças à validade (prévia)}
+
+Construto (proxy $\neq$ produção), interna (censuras), externa (GitHub Actions
+e estratificação) e de conclusão (múltiplas variantes e correção de Holm).
