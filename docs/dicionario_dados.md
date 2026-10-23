@@ -50,4 +50,5 @@ Gerado automaticamente a partir do esquema em `code/pipeline/dataset.py`.
 | `recuperacao_n_censurados` | inteiro | contagem | Qualidade | episódios sem sucesso posterior dentro da janela |
 | `recuperacao_prop_censurados` | decimal | proporção 0–1 | RQ04 | `recuperacao_n_censurados` ÷ `recuperacao_n_episodios` |
 | `meses_sem_runs` | inteiro | meses (0–12) | Qualidade | meses da janela sem nenhuma workflow run coletada (indício de histórico apagado pela API) |
+| `lacunas_de_coleta` | inteiro | contagem | Qualidade | partes da coleta que faltavam no cache ao montar a linha (par de `compare` não coletado, intervalo de workflow runs, releases, metadados ou estrato ausentes); 0 = linha completa. Dado ausente NÃO é o mesmo que zero |
 | `coletado_em` | texto | ISO 8601 UTC | Qualidade | instante da coleta (a API pode deixar de devolver runs antigas) |

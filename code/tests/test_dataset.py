@@ -333,3 +333,36 @@ def test_sem_mapa_da_variante_pre_so_as_colunas_de_releases_sao_calculadas():
     for nome in ("lead_time_a_horas_pre", "lead_time_b_horas_pre", "lt_n_releases_avaliadas_pre",
                  "lt_n_ignoradas_compare_pre", "cfr_b_pre", "cfr_b_n_avaliadas_pre"):
         assert linha[nome] is None, nome
+
+
+# ---------- estrato da amostragem (insumo da RQ06) ----------
+
+def test_esquema_tem_a_coluna_do_estrato():
+    assert "faixa_estrelas" in nomes_colunas()
+
+
+def test_estrato_informado_passa_para_a_linha_sem_ser_recalculado():
+    # Sorteado em 1000-2000, mas com 2003 estrelas hoje: o estrato é o do sorteio.
+    entrada = _entrada()
+    entrada["metadados"] = {"estrelas": 2003}
+    linha = linha_repositorio(**entrada, faixa_estrelas="1000-2000")
+    assert linha["faixa_estrelas"] == "1000-2000" and linha["estrelas"] == 2003
+
+
+def test_estrato_nao_informado_fica_vazio_e_nao_quebra():
+    assert linha_repositorio(**_entrada())["faixa_estrelas"] is None
+
+
+# ---------- lacunas de coleta: dado AUSENTE não pode se passar por dado ZERO ----------
+
+def test_esquema_tem_a_coluna_de_lacunas_de_coleta():
+    assert "lacunas_de_coleta" in nomes_colunas()
+
+
+def test_lacunas_informadas_passam_para_a_linha():
+    assert linha_repositorio(**_entrada(), lacunas_de_coleta=3)["lacunas_de_coleta"] == 3
+    assert linha_repositorio(**_entrada(), lacunas_de_coleta=0)["lacunas_de_coleta"] == 0
+
+
+def test_lacunas_nao_informadas_ficam_vazias():
+    assert linha_repositorio(**_entrada())["lacunas_de_coleta"] is None

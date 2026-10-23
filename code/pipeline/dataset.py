@@ -44,6 +44,7 @@ COLUNAS: tuple[Coluna, ...] = (
     Coluna("linguagem_principal", "texto", "—", "`language` de `GET /repos/{o}/{r}`", "RQ06"),
     Coluna("criado_em", "texto", "ISO 8601 UTC", "`created_at` de `GET /repos/{o}/{r}` (idade = coleta − criado_em)", "RQ06"),
     Coluna("n_contribuidores", "inteiro", "contagem", "última página de `GET /repos/{o}/{r}/contributors?per_page=1&anon=true`", "RQ06"),
+    Coluna("faixa_estrelas", "texto", "—", "faixa de estrelas do desenho estratificado em que o repositório foi sorteado (ex.: `2001-5000`); vem de `docs/s02/selection_evaluated.csv` e NÃO é recalculada das estrelas atuais, que mudam", "RQ06"),
     # --- RQ 01: frequência de deploy ---
     Coluna("n_releases_janela", "inteiro", "contagem", "releases com `draft=false`, `prerelease=false` e `published_at` dentro da janela (inclui a primeira da história)", "RQ01"),
     Coluna("deploys_por_semana", "decimal", "releases/semana", "`n_releases_janela` ÷ semanas da janela (dias da janela ÷ 7, ≈ 52,1)", "RQ01"),
@@ -79,6 +80,7 @@ COLUNAS: tuple[Coluna, ...] = (
     Coluna("recuperacao_prop_censurados", "decimal", "proporção 0–1", "`recuperacao_n_censurados` ÷ `recuperacao_n_episodios`", "RQ04"),
     # --- qualidade e reprodutibilidade da coleta ---
     Coluna("meses_sem_runs", "inteiro", "meses (0–12)", "meses da janela sem nenhuma workflow run coletada (indício de histórico apagado pela API)", "Qualidade"),
+    Coluna("lacunas_de_coleta", "inteiro", "contagem", "partes da coleta que faltavam no cache ao montar a linha (par de `compare` não coletado, intervalo de workflow runs, releases, metadados ou estrato ausentes); 0 = linha completa. Dado ausente NÃO é o mesmo que zero", "Qualidade"),
     Coluna("coletado_em", "texto", "ISO 8601 UTC", "instante da coleta (a API pode deixar de devolver runs antigas)", "Qualidade"),
 )
 
@@ -139,6 +141,8 @@ def linha_repositorio(
     coletado_em: str,
     versao_heuristica: str = "v1",
     commits_por_tag_pre: Optional[Mapping[str, Optional[Sequence[Mapping[str, Any]]]]] = None,
+    faixa_estrelas: Optional[str] = None,
+    lacunas_de_coleta: Optional[int] = None,
 ) -> dict[str, Any]:
     """Uma linha do dataset, pronta para `escrever_csv`.
 
@@ -169,6 +173,7 @@ def linha_repositorio(
         "linguagem_principal": metadados.get("linguagem_principal"),
         "criado_em": metadados.get("criado_em"),
         "n_contribuidores": metadados.get("n_contribuidores"),
+        "faixa_estrelas": faixa_estrelas,
         "n_releases_janela": n_rel,
         "deploys_por_semana": deploys_por_semana(n_rel, janela),
         "lead_time_a_horas": lt.mediana_a_horas,
@@ -198,6 +203,7 @@ def linha_repositorio(
         "recuperacao_n_censurados": rec.n_censurados,
         "recuperacao_prop_censurados": rec.proporcao_censurados,
         "meses_sem_runs": meses_sem_runs(runs, janela),
+        "lacunas_de_coleta": lacunas_de_coleta,
         "coletado_em": coletado_em,
     }
 
