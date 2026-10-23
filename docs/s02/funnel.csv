@@ -1,0 +1,5 @@
+etapa,quantidade,descricao
+candidatos,5519,Repositórios retornados pela busca fatiada
+com_actions,918,Possuem ao menos um workflow no GitHub Actions
+criterio_minimo,300,≥ min_releases e ≥ min_workflow_runs válidos na janela
+amostra,300,Amostra final (limitada ao target_size)
