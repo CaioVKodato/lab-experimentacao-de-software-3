@@ -20,6 +20,7 @@ Gerado automaticamente a partir do esquema em `code/pipeline/dataset.py`.
 | `linguagem_principal` | texto | — | RQ06 | `language` de `GET /repos/{o}/{r}` |
 | `criado_em` | texto | ISO 8601 UTC | RQ06 | `created_at` de `GET /repos/{o}/{r}` (idade = coleta − criado_em) |
 | `n_contribuidores` | inteiro | contagem | RQ06 | última página de `GET /repos/{o}/{r}/contributors?per_page=1&anon=true` |
+| `faixa_estrelas` | texto | — | RQ06 | faixa de estrelas do desenho estratificado em que o repositório foi sorteado (ex.: `2001-5000`); vem de `docs/s02/selection_evaluated.csv` e NÃO é recalculada das estrelas atuais, que mudam |
 | `n_releases_janela` | inteiro | contagem | RQ01 | releases com `draft=false`, `prerelease=false` e `published_at` dentro da janela (inclui a primeira da história) |
 | `deploys_por_semana` | decimal | releases/semana | RQ01 | `n_releases_janela` ÷ semanas da janela (dias da janela ÷ 7, ≈ 52,1) |
 | `lead_time_a_horas` | decimal | horas | RQ02 | mediana, entre releases, de (`published_at` da release − `author.date` do commit mais antigo incluído nela) |

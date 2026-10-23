@@ -369,9 +369,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.csv.is_file():
         raise SystemExit(f"CSV não encontrado: {args.csv}")
     result = analisar(args.csv, args.outdir)
-    print(f"Descritivas → {result['descritivas']}")
-    print(f"Classificação C1 → {result['classificacao']}")
-    print(f"Figuras → {len(result['figuras'])} arquivo(s)")
+    print(f"Descritivas: {result['descritivas']}")
+    print(f"Classificacao C1: {result['classificacao']}")
+    print(f"Figuras: {len(result['figuras'])} arquivo(s)")
     return 0
 
 

@@ -1,0 +1,7 @@
+metrica,rotulo,n,n_ausentes,n_total,mediana,q1,q3,iqr,presente_no_csv
+deploys_por_semana,RQ01 — deploys/semana,70,0,70,0.93015,0.4507,1.5054999999999998,1.0547999999999997,True
+lead_time_a_horas,RQ02 — lead time (a),70,0,70,114.01114999999999,51.970600000000005,209.30905,157.33845000000002,True
+lead_time_b_horas,RQ02 — lead time (b),70,0,70,63.3527,37.7675,158.066475,120.298975,True
+cfr_a,RQ03 — CFR (a),70,0,70,0.16215000000000002,0.089325,0.24482500000000001,0.15550000000000003,True
+cfr_b,RQ03 — CFR (b),70,0,70,0.11715,0.0484,0.2,0.1516,True
+recuperacao_mediana_horas,RQ04 — recuperação (h),61,9,70,8.3292,2.7679,20.9795,18.2116,True

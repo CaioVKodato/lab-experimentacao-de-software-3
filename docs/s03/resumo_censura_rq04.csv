@@ -1,0 +1,2 @@
+n_repos,n_repos_sem_episodio_falha,proporcao_repos_sem_episodio,n_repos_com_prop_censurados,prop_censurados_mediana,prop_censurados_media,tratamento
+70,9,0.12857142857142856,61,0.1429,0.16309180327868852,Repositórios sem episódio de falha ficam com recuperação ausente e entram em n_ausentes da descritiva; não são imputados.
