@@ -85,12 +85,17 @@ cd code
 pytest --cov=metricas --cov-report=term-missing --cov-fail-under=80
 ```
 
-## Artigo — Introdução (Issue #12)
+## Artigo — Introdução (Issue #12) e Metodologia (Issue #30)
 
 Rascunho da Introdução com hipóteses informais das RQ 01–07 (antes de ver os dados):
 
 - Markdown: [`docs/artigo/introducao.md`](docs/artigo/introducao.md)
 - Fragmento LaTeX (template SBC): [`docs/artigo/introducao.tex`](docs/artigo/introducao.tex)
+
+Metodologia (fonte de dados, funil, definições, validação manual):
+
+- Markdown: [`docs/artigo/metodologia.md`](docs/artigo/metodologia.md)
+- Fragmento LaTeX: [`docs/artigo/metodologia.tex`](docs/artigo/metodologia.tex)
 
 **Overleaf do grupo:** _adicionar URL do projeto aqui após criar no [template SBC](https://www.overleaf.com/latex/templates/sbc-conferences-template/blbxwjwzdngr)._
 
