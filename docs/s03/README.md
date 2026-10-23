@@ -1,24 +1,42 @@
-# Sprint S03 — RQ01 a RQ04 (Issue #36)
+# RQ01–RQ04 — descritivas e classificação C1 (Issue #36)
 
-Análise descritiva e classificação DORA de referência **C1** (release + lead time a + CFR a + recuperação).
-
-## Como gerar (reexecutável)
-
-Com o CSV consolidado do pipeline:
+Rodada a partir do dataset de exemplo (70 repositórios). Reexecutar com o CSV consolidado real quando disponível:
 
 ```bash
 cd code
-python -m analise.rq01_rq04 data/output/dataset.csv --outdir ../docs/s03
+python -m analise.rq01_rq04 caminho/do/dataset.csv --outdir ../docs/s03
 ```
 
-Saídas esperadas neste diretório:
+## Resultados (exemplo, n=70)
 
-| Arquivo | Conteúdo |
-|---|---|
-| `tabela_descritivas_rq01_rq04.csv` | mediana, IQR, n, ausentes por métrica |
-| `classificacao_c1_por_repo.csv` | nível por métrica e nota geral |
-| `dist_niveis_*.csv` | contagem Elite/High/Medium/Low (+ ausentes) |
-| `resumo_censura_rq04.csv` | proporção de episódios censurados / repos sem falha |
-| `figuras/` | histogramas e barras da distribuição C1 |
+| Métrica | n | ausentes | mediana | IQR |
+|---|---:|---:|---:|---:|
+| deploys/semana | 70 | 0 | 0,93 | 1,05 |
+| lead time (a) h | 70 | 0 | 114,0 | 157,3 |
+| lead time (b) h | 70 | 0 | 63,4 | 120,3 |
+| CFR (a) | 70 | 0 | 0,162 | 0,156 |
+| CFR (b) | 70 | 0 | 0,117 | 0,152 |
+| recuperação h | 61 | 9 | 8,33 | 18,21 |
 
-Ausentes são sempre reportados; repositórios sem episódio de falha não recebem imputação de recuperação.
+### Classificação C1 (geral)
+
+| Nível | n | proporção |
+|---|---:|---:|
+| Elite | 0 | 0% |
+| High | 37 | 52,9% |
+| Medium | 24 | 34,3% |
+| Low | 0 | 0% |
+| ausente | 9 | 12,9% |
+
+### Censura (RQ04)
+
+Repositórios sem episódio de falha ficam com recuperação ausente (não imputados): **9 / 70**.  
+Mediana da proporção de episódios censurados: **0,143**.
+
+## Arquivos
+
+- `tabela_descritivas_rq01_rq04.csv`
+- `classificacao_c1_por_repo.csv`
+- `dist_niveis_*.csv`
+- `resumo_censura_rq04.csv`
+- `figuras/` — histogramas e barras C1
