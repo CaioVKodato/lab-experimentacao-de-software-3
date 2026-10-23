@@ -415,3 +415,23 @@ def test_falha_nao_conta_como_404(cache: JsonCache):
     client = FakeClient({"/repos/o/r/compare/v1.0...v2.0": 500})
     r = collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
     assert count_not_found([r]) == 0 and count_erros([r]) == 1
+
+
+# ---------------------------------------------------------------------------
+# 422 é recusa determinística de UM par, não instabilidade: não aciona o disjuntor
+# ---------------------------------------------------------------------------
+
+def test_muitos_422_seguidos_nao_abortam_o_repositorio(cache: JsonCache):
+    pares = [_par(i) for i in range(12)]
+    client = FakeClient({_caminho(p): 422 for p in pares})
+    results = collect_repo_commits_between_releases(client, "o", "r", pares, cache=cache)
+    assert len(results) == 12 and count_erros(results) == 12  # todos registrados, nenhum abortou
+
+
+def test_422_no_meio_de_5xx_zera_a_contagem_do_disjuntor(cache: JsonCache):
+    # 4 x 5xx, um 422 e mais 4 x 5xx: nunca chega a 5 SEGUIDOS de instabilidade.
+    status = [502, 502, 502, 502, 422, 502, 502, 502, 502]
+    pares = [_par(i) for i in range(len(status))]
+    client = FakeClient({_caminho(p): s for p, s in zip(pares, status)})
+    results = collect_repo_commits_between_releases(client, "o", "r", pares, cache=cache)
+    assert count_erros(results) == len(status)

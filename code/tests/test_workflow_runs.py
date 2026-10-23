@@ -225,3 +225,10 @@ def test_repositorio_inexistente_404_e_registrado_sem_abortar(cache):
     erros = {f"2026-{m:02d}": 404 for m in range(1, 4)}
     res = coletar_workflow_runs(ClienteComErro([], erros), cache, "o", "r", "main", TRES_MESES)
     assert res.n_falhas == 3 and res.runs == []
+
+
+def test_muitos_422_seguidos_nao_abortam_a_coleta(cache):
+    erros = {f"2026-{m:02d}": 422 for m in range(1, 13)}
+    res = coletar_workflow_runs(ClienteComErro([], erros), cache, "o", "r", "main",
+                                parse_janela("2026-01-01", "2026-12-31"))
+    assert res.n_falhas == 12  # recusa determinística de cada mês; nenhum aborto

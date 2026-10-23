@@ -15,7 +15,7 @@ Cache/retomada: cada intervalo consultado é salvo em disco, inclusive a decisã
 
 Falha persistente (Issue #20): um mês que o GitHub não devolve (5xx, 422, 404) é registrado
 em `n_falhas`, NÃO é gravado no cache e é tentado de novo na próxima execução, em vez de
-derrubar a coleta. Depois de MAX_FALHAS_SEGUIDAS falhas seguidas (exceto 404) a coleta do
+derrubar a coleta. Depois de MAX_FALHAS_SEGUIDAS falhas 5xx seguidas a coleta do
 repositório aborta, para não varrer meses durante uma instabilidade geral. Credencial
 (401/403) continua derrubando de propósito.
 
@@ -111,7 +111,7 @@ def _coletar_intervalo(
             if not (exc.status_code >= 500 or exc.status_code in (404, 422)):
                 raise  # credencial/permissão: não é falha transitória
             acc.falhas += 1
-            if exc.status_code != 404:
+            if exc.status_code >= 500:  # 404 e 422 são recusas determinísticas, não instabilidade
                 acc.seguidas += 1
                 if acc.seguidas >= MAX_FALHAS_SEGUIDAS:
                     raise GitHubAPIError(

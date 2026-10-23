@@ -20,7 +20,7 @@ refeitas em vez de lidas como mensagem vazia, o que degradaria a heurística sem
 Falha persistente (Issue #20): um par que o GitHub não consegue comparar (5xx por "diff
 longo demais", 422) NÃO derruba a etapa: vira um resultado com `erro`, NÃO é gravado no
 cache e é tentado de novo na próxima execução; o dataset o conta como lacuna. Depois de
-MAX_FALHAS_SEGUIDAS falhas seguidas no mesmo repositório a coleta aborta, para não varrer
+MAX_FALHAS_SEGUIDAS falhas 5xx seguidas no mesmo repositório a coleta aborta, para não varrer
 centenas de pares durante uma instabilidade geral do GitHub. Credencial (401/403) continua
 derrubando de propósito.
 """
@@ -196,7 +196,9 @@ def collect_repo_commits_between_releases(
     for base, head in release_pairs:
         result = collect_commits_between(client, owner, name, base, head, cache=cache, force=force)
         results.append(result)
-        seguidas = seguidas + 1 if result.erro is not None else 0
+        # Só 5xx indica instabilidade do GitHub. 422 é recusa determinística de UM par e não
+        # deve abortar: como a falha não vai para o cache, a próxima execução bateria no mesmo ponto.
+        seguidas = seguidas + 1 if (result.erro is not None and result.erro >= 500) else 0
         if seguidas >= MAX_FALHAS_SEGUIDAS:
             raise GitHubAPIError(
                 result.erro or 500,
