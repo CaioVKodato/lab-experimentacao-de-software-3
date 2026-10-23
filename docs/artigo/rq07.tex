@@ -1,0 +1,119 @@
+% Fragmento dos Resultados (RQ07) para o template SBC (Overleaf).
+% Issue #40 -- colar dentro de \section{Resultados}.
+% NUMEROS PARCIAIS: gerados por `python -m analise.rq07` sobre os repositorios com coleta
+% completa no momento da escrita. Atualizar tabelas e numeros do texto ao final da coleta.
+%
+% Bibliografia: adicione as entradas abaixo ao .bib do grupo (ou ajuste as citacoes).
+% @article{cohen1968weighted, author={Cohen, Jacob}, title={Weighted kappa: nominal scale
+%   agreement with provision for scaled disagreement or partial credit},
+%   journal={Psychological Bulletin}, volume={70}, number={4}, pages={213--220}, year={1968}}
+% @article{landis1977measurement, author={Landis, J. Richard and Koch, Gary G.},
+%   title={The measurement of observer agreement for categorical data},
+%   journal={Biometrics}, volume={33}, number={1}, pages={159--174}, year={1977}}
+
+\subsection{RQ07 --- A classifica\c{c}\~ao DORA depende da defini\c{c}\~ao operacional?}
+
+\textbf{M\'etodo.} Classificamos cada reposit\'orio em \textit{Elite}, \textit{High},
+\textit{Medium} ou \textit{Low} com a tabela de refer\^encia da disciplina: cada m\'etrica
+recebe uma nota de 1 a 4, e a classifica\c{c}\~ao geral \'e a mediana das quatro notas,
+arredondada para baixo. Repetimos a classifica\c{c}\~ao sob tr\^es combina\c{c}\~oes de
+defini\c{c}\~oes operacionais (Tabela~\ref{tab:rq07-combinacoes}). Todas usam o mesmo tempo
+de recupera\c{c}\~ao, que depende apenas dos \textit{workflow runs} e n\~ao da defini\c{c}\~ao
+de \textit{release}. \textbf{C1} \'e a combina\c{c}\~ao de refer\^encia. \textbf{C3} altera uma
+\'unica defini\c{c}\~ao, a do \textit{lead time}, de (a) para (b). \textbf{C2} altera tr\^es de
+uma vez: inclui pr\'e-\textit{releases} entre os \textit{deploys} e adota o \textit{lead time}~(b)
+e o CFR~(b). Comparamos as combina\c{c}\~oes duas a duas, entre os reposit\'orios
+classific\'aveis em ambas, pela propor\c{c}\~ao que muda de categoria e pelo kappa ponderado
+linear~\cite{cohen1968weighted}, interpretado pela conven\c{c}\~ao de Landis e
+Koch~\cite{landis1977measurement}.
+
+\begin{table}[ht]
+\centering
+\caption{Combina\c{c}\~oes de defini\c{c}\~oes comparadas.}
+\label{tab:rq07-combinacoes}
+\small
+\begin{tabular}{lllll}
+\hline
+Combina\c{c}\~ao & Unidade de \textit{deploy} & \textit{Lead time} & CFR & Recupera\c{c}\~ao \\
+\hline
+C1 (refer\^encia) & \textit{releases} est\'aveis & (a) & (a) & mediana dos epis\'odios \\
+C2 & \textit{releases} e pr\'e-\textit{releases} & (b) & (b) & mediana dos epis\'odios \\
+C3 & \textit{releases} est\'aveis & (b) & (a) & mediana dos epis\'odios \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Resultados.} A an\'alise cobre 164 reposit\'orios com coleta completa; 149 deles
+(91\%) t\^em as quatro m\'etricas e s\~ao classific\'aveis nas tr\^es combina\c{c}\~oes. A
+Tabela~\ref{tab:rq07-dist} mostra a distribui\c{c}\~ao das categorias. Sob C1, 49,0\% dos
+reposit\'orios s\~ao \textit{Medium} e 40,9\% s\~ao \textit{High} ou \textit{Elite}. Sob C2,
+nenhum reposit\'orio \'e \textit{Elite} e o n\'umero de reposit\'orios \textit{Low} passa de 15
+para 25. C3 fica pr\'oxima de C1.
+
+\begin{table}[ht]
+\centering
+\caption{Distribui\c{c}\~ao das categorias por combina\c{c}\~ao ($n = 149$).}
+\label{tab:rq07-dist}
+\small
+\begin{tabular}{lrrrr}
+\hline
+Combina\c{c}\~ao & \textit{Elite} & \textit{High} & \textit{Medium} & \textit{Low} \\
+\hline
+C1 & 10 (6,7\%) & 51 (34,2\%) & 73 (49,0\%) & 15 (10,1\%) \\
+C2 & 0 (0,0\%) & 35 (23,5\%) & 89 (59,7\%) & 25 (16,8\%) \\
+C3 & 7 (4,7\%) & 57 (38,3\%) & 74 (49,7\%) & 11 (7,4\%) \\
+\hline
+\end{tabular}
+\end{table}
+
+A Tabela~\ref{tab:rq07-pares} compara as combina\c{c}\~oes. Mudar apenas a defini\c{c}\~ao de
+\textit{lead time} (C1 e C3) altera a categoria de 18,1\% dos reposit\'orios, com
+concord\^ancia substancial ($\kappa = 0{,}751$). Combinar as tr\^es mudan\c{c}as (C1 e C2) altera
+a categoria de 45,0\% dos reposit\'orios, com concord\^ancia apenas razo\'avel
+($\kappa = 0{,}341$). C2 e C3 diferem em 37,6\% dos casos ($\kappa = 0{,}464$, concord\^ancia
+moderada).
+
+\begin{table}[ht]
+\centering
+\caption{Concord\^ancia entre combina\c{c}\~oes ($n = 149$).}
+\label{tab:rq07-pares}
+\small
+\begin{tabular}{lrrl}
+\hline
+Par & \% que mudou de categoria & $\kappa$ ponderado & Interpreta\c{c}\~ao \\
+\hline
+C1 e C2 & 45,0\% & 0,341 & razo\'avel \\
+C1 e C3 & 18,1\% & 0,751 & substancial \\
+C2 e C3 & 37,6\% & 0,464 & moderada \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Discuss\~ao.} A classifica\c{c}\~ao DORA de um reposit\'orio n\~ao \'e neutra em rela\c{c}\~ao
+\`a defini\c{c}\~ao operacional adotada. Trocar s\'o a forma de agregar o \textit{lead time}
+preserva a categoria de 82\% dos reposit\'orios, enquanto a combina\c{c}\~ao de unidade de
+\textit{deploy}, \textit{lead time} e CFR diferentes reclassifica quase metade deles e elimina a
+categoria \textit{Elite} nesta amostra. Isso indica que compara\c{c}\~oes entre estudos, ou com os
+relat\'orios de refer\^encia, s\'o s\~ao interpret\'aveis quando a defini\c{c}\~ao operacional \'e
+declarada, e que uma an\'alise de sensibilidade deveria acompanhar qualquer classifica\c{c}\~ao
+baseada em dados de reposit\'orios.
+
+\textbf{Limita\c{c}\~oes.} (i) \textit{Cobertura parcial.} Os n\'umeros se referem aos 164
+reposit\'orios com coleta completa na data da escrita, todos nas quatro faixas de estrelas mais
+baixas (1.000 a 25.000 estrelas; 42, 42, 41 e 39 reposit\'orios por faixa). As tr\^es faixas
+superiores e os 12 reposit\'orios com mais \textit{releases} ainda n\~ao estavam inclu\'idos; os
+resultados n\~ao devem ser extrapolados para a amostra completa. (ii) \textit{Estratifica\c{c}\~ao.}
+A amostra tem aloca\c{c}\~ao igual por faixa de estrelas, ent\~ao as propor\c{c}\~oes descrevem a
+amostra analisada e n\~ao a popula\c{c}\~ao de reposit\'orios do GitHub. (iii) \textit{Desenho n\~ao
+fatorial.} Como C2 altera tr\^es defini\c{c}\~oes simultaneamente, n\~ao \'e poss\'ivel atribuir a
+mudan\c{c}a de 45,0\% a uma delas em particular; s\'o a defini\c{c}\~ao de \textit{lead time} \'e
+isolada (C1 e C3). (iv) \textit{Desvio em rela\c{c}\~ao \`a metodologia.} A variante por
+\textit{tags}, prevista como unidade de \textit{deploy}, n\~ao foi coletada por custo de chamadas
+\`a API; C3 a substitui variando apenas o \textit{lead time}. (v) \textit{Validade do CFR~(b).} A
+heur\'istica de \textit{release} corretiva ainda n\~ao foi validada contra a amostra-ouro, de modo
+que C2 herda essa incerteza. (vi) \textit{Reposit\'orios n\~ao classific\'aveis.} 15 dos 164
+reposit\'orios n\~ao t\^em todas as m\'etricas e ficam de fora: 14 n\~ao t\^em epis\'odio de falha
+conclu\'ido no CI (nenhuma falha, ou falhas sem recupera\c{c}\~ao at\'e o fim da janela), o que torna o
+tempo de recupera\c{c}\~ao ausente por defini\c{c}\~ao, e um n\~ao tem \textit{lead time} calcul\'avel. Como esses
+reposit\'orios saem da classifica\c{c}\~ao, os resultados valem apenas para os que falharam e se
+recuperaram ao menos uma vez, o que pode subestimar as categorias mais altas.
