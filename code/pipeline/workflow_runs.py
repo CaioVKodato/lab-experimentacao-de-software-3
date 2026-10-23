@@ -13,19 +13,28 @@ no teto ficam registrados em `intervalos_truncados` (nada é descartado em silê
 Cache/retomada: cada intervalo consultado é salvo em disco, inclusive a decisão de
 "dividir". Rodar de novo depois de uma queda continua de onde parou, sem repetir chamadas.
 
+Falha persistente (Issue #20): um mês que o GitHub não devolve (5xx, 422, 404) é registrado
+em `n_falhas`, NÃO é gravado no cache e é tentado de novo na próxima execução, em vez de
+derrubar a coleta. Depois de MAX_FALHAS_SEGUIDAS falhas seguidas (exceto 404) a coleta do
+repositório aborta, para não varrer meses durante uma instabilidade geral. Credencial
+(401/403) continua derrubando de propósito.
+
 Usa o GitHubClient existente (paginação por Link + espera de rate limit). O backoff de
 erros 5xx é responsabilidade da Issue #4 e passa a valer aqui automaticamente.
 """
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Protocol
 
 from metricas.janela import Janela
 from pipeline.cache import JsonCache
+from pipeline.github_client import GitHubAPIError
 
 TETO = 1000  # máximo de resultados por consulta filtrada na API
+MAX_FALHAS_SEGUIDAS = 5  # acima disso é instabilidade do GitHub, não um mês ruim
 
 # Só os campos que as métricas usam (a resposta crua de cada run tem dezenas de campos).
 CAMPOS = (
@@ -46,6 +55,7 @@ class ColetaRuns:
     runs: list[dict[str, Any]]
     n_consultas: int                                   # consultas feitas agora (cache não conta)
     intervalos_truncados: tuple[tuple[str, str], ...]  # dias que ainda bateram no teto
+    n_falhas: int = 0                                  # intervalos que falharam e serão refeitos
 
     @property
     def n_truncados(self) -> int:
@@ -73,6 +83,8 @@ class _Acumulador:
         self.runs: list[dict[str, Any]] = []
         self.consultas = 0
         self.truncados: list[tuple[str, str]] = []
+        self.falhas = 0
+        self.seguidas = 0
 
 
 def _coletar_intervalo(
@@ -84,16 +96,37 @@ def _coletar_intervalo(
 
     if registro is None:
         acc.consultas += 1
-        runs = client.paginate(
-            f"/repos/{owner}/{repo}/actions/runs",
-            {
-                "branch": branch,
-                "event": "push",
-                "status": "completed",  # em andamento não tem conclusion e seria ignorado
-                "created": f"{ini.isoformat()}..{fim.isoformat()}",
-            },
-            items_key="workflow_runs",
-        )
+        try:
+            runs = client.paginate(
+                f"/repos/{owner}/{repo}/actions/runs",
+                {
+                    "branch": branch,
+                    "event": "push",
+                    "status": "completed",  # em andamento não tem conclusion e seria ignorado
+                    "created": f"{ini.isoformat()}..{fim.isoformat()}",
+                },
+                items_key="workflow_runs",
+            )
+        except GitHubAPIError as exc:
+            if not (exc.status_code >= 500 or exc.status_code in (404, 422)):
+                raise  # credencial/permissão: não é falha transitória
+            acc.falhas += 1
+            if exc.status_code != 404:
+                acc.seguidas += 1
+                if acc.seguidas >= MAX_FALHAS_SEGUIDAS:
+                    raise GitHubAPIError(
+                        exc.status_code,
+                        f"{acc.seguidas} falhas seguidas nos workflow runs de {owner}/{repo}: provável "
+                        "instabilidade do GitHub. O que já foi coletado está no cache; rode de novo mais tarde.",
+                    ) from exc
+            print(
+                f"[workflow-runs] HTTP {exc.status_code} em {owner}/{repo} ({ini}..{fim}); "
+                "será tentado de novo na próxima execução",
+                file=sys.stderr,
+                flush=True,
+            )
+            return  # não grava no cache
+        acc.seguidas = 0
         bateu_teto = len(runs) >= TETO
         if bateu_teto and ini < fim:
             registro = {"dividido": True}
@@ -124,4 +157,4 @@ def coletar_workflow_runs(
     acc = _Acumulador()
     for ini, fim in meses_da_janela(janela):
         _coletar_intervalo(client, cache, owner, repo, default_branch, ini, fim, acc)
-    return ColetaRuns(acc.runs, acc.consultas, tuple(acc.truncados))
+    return ColetaRuns(acc.runs, acc.consultas, tuple(acc.truncados), acc.falhas)

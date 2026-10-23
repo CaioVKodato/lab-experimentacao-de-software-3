@@ -126,11 +126,14 @@ def test_404_retorna_not_found_sem_propagar(cache: JsonCache):
 
 
 def test_outros_erros_propagam(cache: JsonCache):
+    # Issue #20: 5xx e 422 deixaram de derrubar a etapa (viram falha registrada e refeita
+    # depois; veja os testes de "falha persistente"). Erros inesperados, como permissão
+    # negada, continuam propagando.
     path = "/repos/o/r/compare/v1.0...v2.0"
-    client = FakeClient({path: 500})
+    client = FakeClient({path: 403})
     with pytest.raises(GitHubAPIError) as exc:
         collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
-    assert exc.value.status_code == 500
+    assert exc.value.status_code == 403
 
 
 def test_segunda_chamada_retorna_do_cache(cache: JsonCache):
@@ -354,3 +357,61 @@ def test_commits_coletados_alimentam_a_heuristica_e_o_lead_time_do_grupo():
 def test_csv_de_commits_continua_sem_a_coluna_de_mensagem(tmp_path: Path):
     path = write_commits_csv([], tmp_path / "commits.csv")
     assert path.read_text(encoding="utf-8").strip() == "full_name,base_tag,head_tag,sha,author_date"
+
+
+# ---------------------------------------------------------------------------
+# Falha persistente de um par não pode derrubar a etapa inteira (Issue #20)
+# ---------------------------------------------------------------------------
+
+from pipeline.compare import MAX_FALHAS_SEGUIDAS, count_erros  # noqa: E402
+
+
+def _par(i: int) -> tuple[str, str]:
+    return (f"v{i}", f"v{i + 1}")
+
+
+def _caminho(par: tuple[str, str]) -> str:
+    return f"/repos/o/r/compare/{par[0]}...{par[1]}"
+
+
+@pytest.mark.parametrize("status", [500, 502, 504, 422])
+def test_erro_persistente_vira_falha_registrada_sem_cache_e_sem_derrubar(cache: JsonCache, status: int):
+    caminho = "/repos/o/r/compare/v1.0...v2.0"
+    client = FakeClient({caminho: status})
+    r = collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+    assert r.erro == status and r.not_found is False and r.commits == []
+    assert cache.load(_cache_key("o", "r", "v1.0", "v2.0")) is None  # não grava: será refeito
+
+    client.responses[caminho] = [_raw_commit("abc", "2026-01-15T10:00:00Z")]
+    r2 = collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+    assert r2.erro is None and len(r2.commits) == 1
+    assert cache.load(_cache_key("o", "r", "v1.0", "v2.0")) is not None
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_erro_de_credencial_ou_permissao_continua_derrubando(cache: JsonCache, status: int):
+    client = FakeClient({"/repos/o/r/compare/v1.0...v2.0": status})
+    with pytest.raises(GitHubAPIError):
+        collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+
+
+def test_falhas_seguidas_abortam_o_repositorio_em_vez_de_gravar_lixo(cache: JsonCache):
+    pares = [_par(i) for i in range(10)]
+    client = FakeClient({_caminho(p): 502 for p in pares})
+    with pytest.raises(GitHubAPIError, match="seguidas"):
+        collect_repo_commits_between_releases(client, "o", "r", pares, cache=cache)
+    assert len(client.calls) == MAX_FALHAS_SEGUIDAS  # parou na quinta, não tentou os outros
+
+
+def test_falha_isolada_nao_aborta_e_zera_a_contagem(cache: JsonCache):
+    pares = [_par(i) for i in range(12)]
+    respostas = {_caminho(p): (500 if i % 3 == 0 else [_raw_commit(f"s{i}", "2026-01-15T10:00:00Z")])
+                 for i, p in enumerate(pares)}
+    results = collect_repo_commits_between_releases(FakeClient(respostas), "o", "r", pares, cache=cache)
+    assert len(results) == 12 and count_erros(results) == 4
+
+
+def test_falha_nao_conta_como_404(cache: JsonCache):
+    client = FakeClient({"/repos/o/r/compare/v1.0...v2.0": 500})
+    r = collect_commits_between(client, "o", "r", "v1.0", "v2.0", cache=cache)
+    assert count_not_found([r]) == 0 and count_erros([r]) == 1

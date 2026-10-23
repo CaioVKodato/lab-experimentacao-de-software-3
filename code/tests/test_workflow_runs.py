@@ -162,3 +162,66 @@ def test_repositorios_diferentes_nao_compartilham_cache(cache):
     res = coletar_workflow_runs(outro, cache, "o", "b", "main", MARCO)
     assert len(outro.chamadas) == 1
     assert [r["id"] for r in res.runs] == [2]
+
+# ---------------------------------------------------------------------------
+# Um mês que falha de forma persistente não derruba a coleta (Issue #20)
+# ---------------------------------------------------------------------------
+
+from pipeline.github_client import GitHubAPIError  # noqa: E402
+
+
+class ClienteComErro(ClienteFalso):
+    """Como o ClienteFalso, mas falha com GitHubAPIError nos meses indicados."""
+
+    def __init__(self, runs, erros_por_mes):
+        super().__init__(runs)
+        self.erros_por_mes = erros_por_mes
+
+    def paginate(self, path, params=None, *, items_key=None, max_items=None):
+        mes = params["created"].split("..")[0][:7]
+        if mes in self.erros_por_mes:
+            self.chamadas.append((path, dict(params or {}), items_key))
+            raise GitHubAPIError(self.erros_por_mes[mes], "simulado")
+        return super().paginate(path, params, items_key=items_key, max_items=max_items)
+
+
+TRES_MESES = parse_janela("2026-01-01", "2026-03-31")
+RUNS_3M = [run(1, "2026-01-10"), run(2, "2026-02-10"), run(3, "2026-03-10")]
+
+
+def test_mes_com_erro_5xx_e_pulado_nao_vai_para_o_cache_e_e_refeito(cache):
+    res = coletar_workflow_runs(ClienteComErro(RUNS_3M, {"2026-02": 503}), cache, "o", "r", "main", TRES_MESES)
+    assert res.n_falhas == 1 and sorted(r["id"] for r in res.runs) == [1, 3]
+    assert cache.load("o__r/workflow_runs/2026-02-01_2026-02-28") is None
+
+    retomada = ClienteFalso(RUNS_3M)
+    res2 = coletar_workflow_runs(retomada, cache, "o", "r", "main", TRES_MESES)
+    assert len(retomada.chamadas) == 1 and res2.n_falhas == 0  # só o mês que faltava
+    assert sorted(r["id"] for r in res2.runs) == [1, 2, 3]
+
+
+def test_falhas_seguidas_abortam_a_coleta_do_repositorio(cache):
+    meses = {f"2026-{m:02d}": 503 for m in range(1, 13)}
+    cliente = ClienteComErro([], meses)
+    with pytest.raises(GitHubAPIError, match="seguidas"):
+        coletar_workflow_runs(cliente, cache, "o", "r", "main", parse_janela("2026-01-01", "2026-12-31"))
+    assert len(cliente.chamadas) == wr.MAX_FALHAS_SEGUIDAS
+
+
+def test_falhas_isoladas_nao_abortam(cache):
+    erros = {"2026-01": 500, "2026-03": 500, "2026-05": 500}
+    res = coletar_workflow_runs(ClienteComErro([], erros), cache, "o", "r", "main",
+                                parse_janela("2026-01-01", "2026-06-30"))
+    assert res.n_falhas == 3
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_erro_de_credencial_continua_derrubando(cache, status):
+    with pytest.raises(GitHubAPIError):
+        coletar_workflow_runs(ClienteComErro([], {"2026-01": status}), cache, "o", "r", "main", TRES_MESES)
+
+
+def test_repositorio_inexistente_404_e_registrado_sem_abortar(cache):
+    erros = {f"2026-{m:02d}": 404 for m in range(1, 4)}
+    res = coletar_workflow_runs(ClienteComErro([], erros), cache, "o", "r", "main", TRES_MESES)
+    assert res.n_falhas == 3 and res.runs == []

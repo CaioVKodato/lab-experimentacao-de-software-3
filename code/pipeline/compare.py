@@ -16,11 +16,19 @@ Mensagem do commit (Issue #20): a heurística de CFR (b) procura `fix`, `hotfix`
 `revert` na mensagem, então cada commit guarda `message` (truncada em MAX_MENSAGEM).
 O cache é VERSIONADO: entradas gravadas antes dessa mudança não têm a mensagem e são
 refeitas em vez de lidas como mensagem vazia, o que degradaria a heurística sem erro.
+
+Falha persistente (Issue #20): um par que o GitHub não consegue comparar (5xx por "diff
+longo demais", 422) NÃO derruba a etapa: vira um resultado com `erro`, NÃO é gravado no
+cache e é tentado de novo na próxima execução; o dataset o conta como lacuna. Depois de
+MAX_FALHAS_SEGUIDAS falhas seguidas no mesmo repositório a coleta aborta, para não varrer
+centenas de pares durante uma instabilidade geral do GitHub. Credencial (401/403) continua
+derrubando de propósito.
 """
 
 from __future__ import annotations
 
 import csv
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -29,6 +37,7 @@ from pipeline.cache import JsonCache
 from pipeline.github_client import GitHubAPIError
 
 CACHE_VERSAO = 2        # v1 = commits só com sha e data (sem mensagem)
+MAX_FALHAS_SEGUIDAS = 5  # num mesmo repositório: acima disso é instabilidade, não um par ruim
 MAX_MENSAGEM = 1000     # limita o tamanho do cache; sobra de sobra para achar fix/hotfix/revert
 
 
@@ -66,6 +75,7 @@ class CompareResult:
     commits: list[CommitEntry]
     not_found: bool = False  # True quando a API retornou 404
     from_cache: bool = False
+    erro: int | None = None  # status HTTP de uma falha persistente (não cacheada)
 
 
 _COMMIT_FIELDS = ["full_name", "base_tag", "head_tag", "sha", "author_date"]
@@ -139,6 +149,17 @@ def collect_commits_between(
                 "not_found": True,
             })
             return result
+        if exc.status_code >= 500 or exc.status_code == 422:
+            print(
+                f"[compare] HTTP {exc.status_code} em {base_tag}...{head_tag} de {full_name}; "
+                "será tentado de novo na próxima execução",
+                file=sys.stderr,
+                flush=True,
+            )
+            return CompareResult(
+                full_name=full_name, base_tag=base_tag, head_tag=head_tag,
+                commits=[], not_found=False, erro=exc.status_code,
+            )
         raise
 
     commits = [_extract_commit(c) for c in raw_commits]
@@ -167,11 +188,22 @@ def collect_repo_commits_between_releases(
     cache: JsonCache,
     force: bool = False,
 ) -> list[CompareResult]:
-    """Coleta commits para cada par (base_tag, head_tag) da lista."""
-    return [
-        collect_commits_between(client, owner, name, base, head, cache=cache, force=force)
-        for base, head in release_pairs
-    ]
+    """Coleta commits para cada par (base_tag, head_tag) da lista.
+
+    Falhas persistentes isoladas são toleradas; MAX_FALHAS_SEGUIDAS seguidas abortam."""
+    results: list[CompareResult] = []
+    seguidas = 0
+    for base, head in release_pairs:
+        result = collect_commits_between(client, owner, name, base, head, cache=cache, force=force)
+        results.append(result)
+        seguidas = seguidas + 1 if result.erro is not None else 0
+        if seguidas >= MAX_FALHAS_SEGUIDAS:
+            raise GitHubAPIError(
+                result.erro or 500,
+                f"{seguidas} falhas seguidas no compare de {owner}/{name}: provável instabilidade "
+                "do GitHub. O que já foi coletado está no cache; rode de novo mais tarde.",
+            )
+    return results
 
 
 def write_commits_csv(results: list[CompareResult], output_path: Path) -> Path:
@@ -192,6 +224,11 @@ def write_commits_csv(results: list[CompareResult], output_path: Path) -> Path:
                     "author_date": commit.author_date,
                 })
     return output_path
+
+
+def count_erros(results: list[CompareResult]) -> int:
+    """Quantos pares falharam de forma persistente e não foram para o cache."""
+    return sum(1 for r in results if r.erro is not None)
 
 
 def count_not_found(results: list[CompareResult]) -> int:
